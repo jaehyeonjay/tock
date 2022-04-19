@@ -439,7 +439,7 @@ impl<'a> Uarte<'a> {
 
 impl<'a> hil::uart::Transmit<'a> for Uarte<'a> {
     fn set_transmit_client(&self, client: &'a dyn hil::uart::TransmitClient) {
-        unimplemented!()
+        self.tx_client.set(client);
     }
 
     fn transmit_buffer(
@@ -447,7 +447,14 @@ impl<'a> hil::uart::Transmit<'a> for Uarte<'a> {
         tx_buffer: &'static mut [u8],
         tx_len: usize,
     ) -> Result<(), (ErrorCode, &'static mut [u8])> {
-        unimplemented!()
+        if tx_len == 0 || tx_len > tx_data.len() {
+            Err((ErrorCode::SIZE, tx_data))
+        } else if self.tx_buffer.is_some() {
+            Err((ErrorCode::BUSY, tx_data))
+        } else {
+            self.setup_buffer_transmit(tx_data, tx_len);
+            Ok(())
+        }
     }
 
     fn transmit_character(&self, character: u32) -> Result<(), ErrorCode> {
@@ -455,6 +462,21 @@ impl<'a> hil::uart::Transmit<'a> for Uarte<'a> {
     }
 
     fn transmit_abort(&self) -> hil::uart::AbortResult {
+        unimplemented!()
+    }
+}
+
+impl<'a> hil::uart::TransmitClient for Uarte<'a> {
+    fn transmitted_character(&self, _rval: Result<(), ErrorCode>) {
+        unimplemented!()
+    }
+
+    fn transmitted_buffer(
+        &self,
+        tx_buffer: &'static mut [u8],
+        tx_len: usize,
+        rval: Result<(), ErrorCode>,
+    ) {
         unimplemented!()
     }
 }
@@ -482,7 +504,7 @@ impl<'a> hil::uart::Receive<'a> for Uarte<'a> {
 }
 impl<'a> hil::uart::Configure for Uarte<'a> {
     fn set_baud_rate(&self, rate: u32) -> Result<u32, ErrorCode> {
-        unimplemented!()
+        self.set_baud_rate(rate)
     }
     fn set_width(&self, width: hil::uart::Width) -> Result<(), ErrorCode> {
         unimplemented!()
