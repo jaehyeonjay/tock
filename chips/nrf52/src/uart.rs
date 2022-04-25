@@ -279,18 +279,6 @@ impl<'a> Uarte<'a> {
         self.registers.enable.write(Uart::ENABLE::OFF);
     }
 
-    //TEMP
-    // #[allow(dead_code)]
-    // fn set_available(&self) {
-    //     self.uart_available.set(true);
-    // }
-
-    //TEMP
-    // #[allow(dead_code)]
-    // fn set_unavailable(&self) {
-    //     self.uart_available.set(false);
-    // }
-
     fn enable_rx_interrupts(&self) {
         self.registers.intenset.write(Interrupt::ENDRX::SET);
     }
@@ -486,8 +474,17 @@ impl<'a> hil::uart::Transmit<'a> for Uarte<'a> {
     }
 
     fn transmit_abort(&self) -> hil::uart::AbortResult {
-        // Err(ErrorCode::FAIL)
-        unimplemented!()
+        if self.tx_ready() {
+            hil::uart::AbortResult::NoCallback
+        } else if self.tx_remaining_bytes.get() == 0 {
+            // transmit finished, but has not called callback (so tx_ready() is false)
+            // should not abort here  (since just waiting for callback to be invoked)
+            hil::uart::AbortResult::Callback(false)
+        } else {
+            //stop the transmission
+            self.registers.task_stoptx.write(Task::ENABLE::SET);
+            hil::uart::AbortResult::Callback(true)
+        }
     }
 }
 
