@@ -53,7 +53,6 @@ static mut CHIP: Option<&'static sam4l::chip::Sam4l<Sam4lDefaultPeripherals>> = 
 pub static mut STACK_MEMORY: [u8; 0x2000] = [0; 0x2000];
 
 struct Imix {
-    console: &'static capsules::console::Console<'static>,
     alarm: &'static AlarmDriver<'static, VirtualMuxAlarm<'static, sam4l::ast::Ast<'static>>>,
     led:
         &'static capsules::led::LedDriver<'static, LedHigh<'static, sam4l::gpio::GPIOPin<'static>>>,
@@ -67,7 +66,6 @@ impl SyscallDriverLookup for Imix {
         F: FnOnce(Option<&dyn kernel::syscall::SyscallDriver>) -> R,
     {
         match driver_num {
-            capsules::console::DRIVER_NUM => f(Some(self.console)),
             capsules::alarm::DRIVER_NUM => f(Some(self.alarm)),
             capsules::led::DRIVER_NUM => f(Some(self.led)),
             _ => f(None),
@@ -262,20 +260,6 @@ pub unsafe fn main() {
     //    ConsoleComponent::new(board_kernel, capsules::console::DRIVER_NUM, uart_mux).finalize(());
     //DebugWriterComponent::new(uart_mux).finalize(());
 
-    let grant_cap = create_capability!(capabilities::MemoryAllocationCapability);
-    let console = static_init!(
-        capsules::console::Console<'static>,
-        capsules::console::Console::new(
-            &peripherals.usart3,
-            &mut capsules::console::WRITE_BUF,
-            &mut capsules::console::READ_BUF,
-            board_kernel.create_grant(capsules::console::DRIVER_NUM, &grant_cap)
-        )
-    );
-    use kernel::hil;
-    hil::uart::Transmit::set_transmit_client(&peripherals.usart3, console);
-    // NOTE: no receive client set
-
     // # TIMER
     let mux_alarm = AlarmMuxComponent::new(&peripherals.ast)
         .finalize(components::alarm_mux_component_helper!(sam4l::ast::Ast));
@@ -295,7 +279,6 @@ pub unsafe fn main() {
         .finalize(components::rr_component_helper!(NUM_PROCS));
 
     let imix = Imix {
-        console,
         alarm,
         led,
         scheduler,
