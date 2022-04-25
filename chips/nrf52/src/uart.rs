@@ -171,6 +171,7 @@ pub struct Uarte<'a> {
     rx_remaining_bytes: Cell<usize>,
     rx_abort_in_progress: Cell<bool>,
     offset: Cell<usize>,
+    // uart_available: Cell<bool>,
 }
 
 #[derive(Copy, Clone)]
@@ -193,6 +194,8 @@ impl<'a> Uarte<'a> {
             rx_remaining_bytes: Cell::new(0),
             rx_abort_in_progress: Cell::new(false),
             offset: Cell::new(0),
+            //TEMP
+            // uart_available: Cell::new(false),
         }
     }
 
@@ -235,9 +238,12 @@ impl<'a> Uarte<'a> {
         self.registers.event_endtx.write(Event::READY::CLEAR);
 
         self.enable_uart();
+
+        //TEMP
+        // self.set_available();
     }
 
-    fn set_baud_rate(&self, baud_rate: u32) {
+    fn set_baud_rate(&self, baud_rate: u32) -> Result<u32, ErrorCode> {
         match baud_rate {
             1200 => self.registers.baudrate.set(0x0004F000),
             2400 => self.registers.baudrate.set(0x0009D000),
@@ -257,6 +263,10 @@ impl<'a> Uarte<'a> {
             1000000 => self.registers.baudrate.set(0x10000000),
             _ => self.registers.baudrate.set(0x01D60000), //setting default to 115200
         }
+
+        // TEMP
+        // TODO: make configure follow new HIL
+        Ok(self.registers.baudrate.get())
     }
 
     // Enable UART peripheral, this need to disabled for low power applications
@@ -268,6 +278,18 @@ impl<'a> Uarte<'a> {
     fn disable_uart(&self) {
         self.registers.enable.write(Uart::ENABLE::OFF);
     }
+
+    //TEMP
+    // #[allow(dead_code)]
+    // fn set_available(&self) {
+    //     self.uart_available.set(true);
+    // }
+
+    //TEMP
+    // #[allow(dead_code)]
+    // fn set_unavailable(&self) {
+    //     self.uart_available.set(false);
+    // }
 
     fn enable_rx_interrupts(&self) {
         self.registers.intenset.write(Interrupt::ENDRX::SET);
@@ -438,8 +460,8 @@ impl<'a> Uarte<'a> {
 }
 
 impl<'a> hil::uart::Transmit<'a> for Uarte<'a> {
-    fn set_transmit_client(&self, client: &'a dyn hil::uart::TransmitClient) {
-        unimplemented!()
+    fn set_transmit_client(&self, client: &'a dyn uart::TransmitClient) {
+        self.tx_client.set(client);
     }
 
     fn transmit_buffer(
@@ -447,17 +469,40 @@ impl<'a> hil::uart::Transmit<'a> for Uarte<'a> {
         tx_buffer: &'static mut [u8],
         tx_len: usize,
     ) -> Result<(), (ErrorCode, &'static mut [u8])> {
-        unimplemented!()
+        if tx_len == 0 || tx_len > tx_buffer.len() {
+            Err((ErrorCode::SIZE, tx_buffer))
+        } else if self.tx_buffer.is_some() {
+            Err((ErrorCode::BUSY, tx_buffer))
+        } else {
+            self.setup_buffer_transmit(tx_buffer, tx_len);
+            Ok(())
+        }
     }
 
     fn transmit_character(&self, character: u32) -> Result<(), ErrorCode> {
-        unimplemented!()
+        Err(ErrorCode::FAIL)
     }
 
     fn transmit_abort(&self) -> hil::uart::AbortResult {
+        // Err(ErrorCode::FAIL)
         unimplemented!()
     }
 }
+
+// impl<'a> hil::uart::TransmitClient for Uarte<'a> {
+//     fn transmitted_character(&self, _rval: Result<(), ErrorCode>) {
+//         unimplemented!()
+//     }
+
+//     fn transmitted_buffer(
+//         &self,
+//         tx_buffer: &'static mut [u8],
+//         tx_len: usize,
+//         rval: Result<(), ErrorCode>,
+//     ) {
+//         ()
+//     }
+// }
 
 impl<'a> hil::uart::Receive<'a> for Uarte<'a> {
     fn set_receive_client(&self, client: &'a dyn hil::uart::ReceiveClient) {
@@ -498,7 +543,21 @@ impl<'a> hil::uart::Configure for Uarte<'a> {
     }
 
     fn configure(&self, params: hil::uart::Parameters) -> Result<(), ErrorCode> {
-        unimplemented!()
+        //        // These could probably be implemented, but are currently ignored, so
+        // throw an error.
+        if params.stop_bits != uart::StopBits::One {
+            return Err(ErrorCode::NOSUPPORT);
+        }
+        if params.parity != uart::Parity::None {
+            return Err(ErrorCode::NOSUPPORT);
+        }
+        if params.hw_flow_control != false {
+            return Err(ErrorCode::NOSUPPORT);
+        }
+
+        self.set_baud_rate(params.baud_rate);
+
+        Ok(())
     }
 }
 
