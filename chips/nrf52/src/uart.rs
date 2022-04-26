@@ -238,9 +238,6 @@ impl<'a> Uarte<'a> {
         self.registers.event_endtx.write(Event::READY::CLEAR);
 
         self.enable_uart();
-
-        //TEMP
-        // self.set_available();
     }
 
     fn set_baud_rate(&self, baud_rate: u32) -> Result<u32, ErrorCode> {
@@ -314,6 +311,17 @@ impl<'a> Uarte<'a> {
                 self.tx_client.map(|client| {
                     self.tx_buffer.take().map(|tx_buffer| {
                         client.transmitted_buffer(tx_buffer, self.tx_len.get(), Ok(()));
+                    });
+                });
+            } else if self.registers.event_txstopped.is_set(Event::READY) {
+                // transmission was aborted, let client know
+                self.tx_client.map(|client| {
+                    self.tx_buffer.take().map(|tx_buffer| {
+                        client.transmitted_buffer(
+                            tx_buffer,
+                            self.tx_len.get(),
+                            Err(ErrorCode::CANCEL),
+                        );
                     });
                 });
             } else {
@@ -445,6 +453,17 @@ impl<'a> Uarte<'a> {
 
         self.enable_tx_interrupts();
     }
+
+    fn setup_character_transmit(&self, character: u32) {
+        const TX_LEN: usize = core::mem::size_of::<u32>();
+        static mut BUF: &'static mut [u8] = &mut [0; 4];
+        unsafe {
+            for index in 0..4 {
+                BUF[index] = (character & (0xFF << (index * 8))) as u8;
+            }
+            self.setup_buffer_transmit(BUF, TX_LEN);
+        }
+    }
 }
 
 impl<'a> hil::uart::Transmit<'a> for Uarte<'a> {
@@ -470,7 +489,14 @@ impl<'a> hil::uart::Transmit<'a> for Uarte<'a> {
     }
 
     fn transmit_character(&self, character: u32) -> Result<(), ErrorCode> {
-        Err(ErrorCode::FAIL)
+        if !self.registers.enable.is_set(Uart::ENABLE) {
+            Err(ErrorCode::OFF)
+        } else if self.tx_buffer.is_some() {
+            Err(ErrorCode::BUSY)
+        } else {
+            self.setup_character_transmit(character);
+            Ok(())
+        }
     }
 
     fn transmit_abort(&self) -> hil::uart::AbortResult {
@@ -487,21 +513,6 @@ impl<'a> hil::uart::Transmit<'a> for Uarte<'a> {
         }
     }
 }
-
-// impl<'a> hil::uart::TransmitClient for Uarte<'a> {
-//     fn transmitted_character(&self, _rval: Result<(), ErrorCode>) {
-//         unimplemented!()
-//     }
-
-//     fn transmitted_buffer(
-//         &self,
-//         tx_buffer: &'static mut [u8],
-//         tx_len: usize,
-//         rval: Result<(), ErrorCode>,
-//     ) {
-//         ()
-//     }
-// }
 
 impl<'a> hil::uart::Receive<'a> for Uarte<'a> {
     fn set_receive_client(&self, client: &'a dyn hil::uart::ReceiveClient) {
