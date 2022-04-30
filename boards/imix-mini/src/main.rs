@@ -273,8 +273,11 @@ pub unsafe fn main() {
         )
     );
     use kernel::hil;
-    hil::uart::Transmit::set_transmit_client(&peripherals.usart3, console);
+    // hil::uart::Transmit::set_transmit_client(&peripherals.usart3, console);
     // NOTE: no receive client set
+    let echo = static_init!(Echo<'static>, Echo::new(&peripherals.usart3));
+    hil::uart::Receive::set_receive_client(&peripherals.usart3, echo);
+    hil::uart::Receive::receive_buffer(&peripherals.usart3, &mut ECHO_BUFFER, 4);
 
     // # TIMER
     let mux_alarm = AlarmMuxComponent::new(&peripherals.ast)
@@ -311,6 +314,16 @@ pub unsafe fn main() {
     //test::virtual_uart_rx_test::run_virtual_uart_receive(uart_mux);
     debug!("Initialization complete. Entering main loop");
     debug!("A second line");
+    use kernel::hil::uart::Configuration;
+    debug!("System freq: {:?}", pm.get_system_frequency());
+    debug!("Baud rate: {:?}", &peripherals.usart3.get_baud_rate());
+    debug!("Width: {:?}", &peripherals.usart3.get_width());
+    debug!("Parity: {:?}", &peripherals.usart3.get_parity());
+    debug!("Stop bits: {:?}", &peripherals.usart3.get_stop_bits());
+    debug!(
+        "HW flow control: {:?}",
+        &peripherals.usart3.get_flow_control()
+    );
 
     /// These symbols are defined in the linker script.
     extern "C" {
@@ -345,4 +358,30 @@ pub unsafe fn main() {
     });
 
     board_kernel.kernel_loop::<_, _, NUM_PROCS, 0>(&imix, chip, None, &main_cap);
+}
+
+static mut ECHO_BUFFER: [u8; 64] = [0; 64];
+
+struct Echo<'a> {
+    uart: &'a dyn kernel::hil::uart::UartData<'a>,
+}
+
+impl<'a> Echo<'a> {
+    pub fn new(uart: &'a dyn kernel::hil::uart::UartData<'a>) -> Self {
+        Self { uart }
+    }
+}
+
+impl<'a> kernel::hil::uart::ReceiveClient for Echo<'a> {
+    fn received_buffer(
+        &self,
+        rx_buffer: &'static mut [u8],
+        rx_len: usize,
+        rval: Result<(), kernel::ErrorCode>,
+        error: kernel::hil::uart::Error,
+    ) {
+        use kernel::hil::uart::Receive;
+        debug!("Received {:?}", &rx_buffer[..rx_len]);
+        self.uart.receive_buffer(rx_buffer, 4);
+    }
 }

@@ -10,7 +10,9 @@ use kernel::hil::spi;
 use kernel::hil::uart;
 use kernel::utilities::cells::OptionalCell;
 use kernel::utilities::registers::interfaces::{ReadWriteable, Readable, Writeable};
-use kernel::utilities::registers::{register_bitfields, ReadOnly, ReadWrite, WriteOnly};
+use kernel::utilities::registers::{
+    register_bitfields, FieldValue, ReadOnly, ReadWrite, WriteOnly,
+};
 use kernel::utilities::StaticRef;
 use kernel::ErrorCode;
 
@@ -722,6 +724,101 @@ impl<'a> USART<'a> {
         };
     }
 
+    fn calculate_uart_baud(over_bit: u32, clock_freq: u32, cd: u32, fp: u32) -> u32 {
+        clock_freq / (8 * (2 - over_bit) * cd + fp) // from sam4l datasheet page 587
+    }
+
+    fn configure_uart(
+        &self,
+        baud_rate: Option<u32>,
+        width: Option<uart::Width>,
+        parity: Option<uart::Parity>,
+        stop_bits: Option<uart::StopBits>,
+        hw_flow_control: Option<bool>,
+    ) -> Result<Option<u32>, ErrorCode> {
+        if self.usart_mode.get() != UsartMode::Uart {
+            return Err(ErrorCode::OFF);
+        }
+
+        let usart = &USARTRegManager::new(&self);
+        let mut mode = <FieldValue<u32, _>>::new(0u32, 0, 0u32); // create a blank field value
+
+        if let Some(width) = width {
+            mode += Mode::MODE9::CLEAR;
+            mode += match width {
+                // uart HIL seems to lack support for 5 bit width as of now
+                uart::Width::Six => Mode::CHRL::BITS6,
+                uart::Width::Seven => Mode::CHRL::BITS7,
+                uart::Width::Eight => Mode::CHRL::BITS8,
+                uart::Width::Nine => Mode::MODE9::SET,
+            };
+        }
+
+        if let Some(parity) = parity {
+            mode += match parity {
+                uart::Parity::None => Mode::PAR::NONE,
+                uart::Parity::Even => Mode::PAR::EVEN,
+                uart::Parity::Odd => Mode::PAR::ODD,
+            };
+        }
+
+        if let Some(stop_bits) = stop_bits {
+            mode += match stop_bits {
+                uart::StopBits::One => Mode::NBSTOP::BITS_1_1,
+                uart::StopBits::Two => Mode::NBSTOP::BITS_2_2,
+            };
+        }
+
+        if let Some(hw_flow_control) = hw_flow_control {
+            mode += match hw_flow_control {
+                true => Mode::MODE::HARD_HAND,
+                false => Mode::MODE::NORMAL,
+            };
+        }
+
+        let actual_baud = match baud_rate {
+            None => None,
+            Some(0) => return Err(ErrorCode::INVAL),
+            Some(baud_rate) => {
+                let system_frequency = self.pm.get_system_frequency();
+                mode += Mode::USCLKS::CLK_USART; // use USART clock
+                mode += Mode::OVER::SET; // use 8x oversampling (not sure when to choose 16x)
+
+                // this is in units of fp (8x oversampling cancels with 1/8 for fp)
+                let div = system_frequency / baud_rate;
+                let cd = div / 8;
+                let fp = div % 8;
+
+                let real_baud = Self::calculate_uart_baud(
+                    Mode::OVER.read(mode.into()),
+                    system_frequency,
+                    cd,
+                    fp,
+                );
+                let diff = if baud_rate > real_baud {
+                    baud_rate - real_baud
+                } else {
+                    real_baud - baud_rate
+                };
+                let error = (100 * diff) / baud_rate;
+                if error >= 5 || cd == 0 || cd > u16::MAX.into() {
+                    // sam4l datasheet p588 recommends against >5% error rate
+                    // if cd == 0, then we exceeded the maximum baud rate, cd only gets 16 bits
+                    return Err(ErrorCode::INVAL);
+                }
+                // do this last so either both registers (MR + BRGR) are updated or neither
+                usart
+                    .registers
+                    .brgr
+                    .write(BaudRate::CD.val(cd) + BaudRate::FP.val(fp));
+                Some(real_baud)
+            }
+        };
+
+        usart.registers.mr.modify(mode);
+        Ok(actual_baud)
+    }
+
     /// In non-SPI mode, this drives RTS low.
     /// In SPI mode, this asserts (drives low) the chip select line.
     fn rts_enable_spi_assert_cs(&self, usart: &USARTRegManager) {
@@ -887,7 +984,12 @@ impl<'a> hil::uart::Transmit<'a> for USART<'a> {
 
 impl<'a> hil::uart::Receive<'a> for USART<'a> {
     fn set_receive_client(&self, client: &'a dyn hil::uart::ReceiveClient) {
-        unimplemented!()
+        // Should we check if we are in SPI mode?
+        if let Some(UsartClient::Uart(_rx, Some(tx))) = self.client.take() {
+            self.client.set(UsartClient::Uart(Some(client), Some(tx)));
+        } else {
+            self.client.set(UsartClient::Uart(Some(client), None));
+        }
     }
 
     fn receive_buffer(
@@ -895,7 +997,25 @@ impl<'a> hil::uart::Receive<'a> for USART<'a> {
         rx_buffer: &'static mut [u8],
         rx_len: usize,
     ) -> Result<(), (ErrorCode, &'static mut [u8])> {
-        unimplemented!()
+        // TODO: do we need to check BUSY
+        if rx_len > rx_buffer.len() {
+            return Err((ErrorCode::SIZE, rx_buffer));
+        }
+        let usart = &USARTRegManager::new(&self);
+
+        // enable RX
+        self.enable_rx(usart);
+        self.enable_rx_error_interrupts(usart);
+        self.usart_rx_state.set(USARTStateRX::DMA_Receiving); // TODO: is this a problem if UART is OFF?
+                                                              // set up dma transfer and start reception
+        if let Some(dma) = self.rx_dma.get() {
+            dma.enable();
+            self.rx_len.set(rx_len);
+            dma.do_transfer(self.rx_dma_peripheral, rx_buffer, rx_len);
+            Ok(())
+        } else {
+            Err((ErrorCode::OFF, rx_buffer))
+        }
     }
 
     fn receive_character(&self) -> Result<(), ErrorCode> {
@@ -908,75 +1028,109 @@ impl<'a> hil::uart::Receive<'a> for USART<'a> {
 }
 impl<'a> hil::uart::Configure for USART<'a> {
     fn set_baud_rate(&self, rate: u32) -> Result<u32, ErrorCode> {
-        unimplemented!()
+        self.configure_uart(Some(rate), None, None, None, None)
+            .map(|actual_rate| {
+                match actual_rate {
+                    Some(rate) => rate,
+                    _ => unreachable!(), // if a baud rate was passed as input, then we will get Some on success
+                }
+            })
     }
     fn set_width(&self, width: hil::uart::Width) -> Result<(), ErrorCode> {
-        unimplemented!()
+        self.configure_uart(None, Some(width), None, None, None)
+            .map(|_| ())
     }
     fn set_parity(&self, parity: hil::uart::Parity) -> Result<(), ErrorCode> {
-        unimplemented!()
+        self.configure_uart(None, None, Some(parity), None, None)
+            .map(|_| ())
     }
     fn set_stop_bits(&self, stop: hil::uart::StopBits) -> Result<(), ErrorCode> {
-        unimplemented!()
+        self.configure_uart(None, None, None, Some(stop), None)
+            .map(|_| ())
     }
     fn set_flow_control(&self, on: bool) -> Result<(), ErrorCode> {
-        unimplemented!()
+        self.configure_uart(None, None, None, None, Some(on))
+            .map(|_| ())
     }
 
     fn configure(&self, params: hil::uart::Parameters) -> Result<(), ErrorCode> {
-        if self.usart_mode.get() != UsartMode::Uart {
-            return Err(ErrorCode::OFF);
-        }
-
-        let usart = &USARTRegManager::new(&self);
-
-        // set USART mode register
-        let mut mode = Mode::OVER::SET; // OVER: oversample at 8x
-
-        mode += Mode::CHRL::BITS8; // CHRL: 8-bit characters
-        mode += Mode::USCLKS::CLK_USART; // USCLKS: select CLK_USART
-
-        mode += match params.stop_bits {
-            uart::StopBits::One => Mode::NBSTOP::BITS_1_1,
-            uart::StopBits::Two => Mode::NBSTOP::BITS_2_2,
-        };
-
-        mode += match params.parity {
-            uart::Parity::None => Mode::PAR::NONE, // no parity
-            uart::Parity::Odd => Mode::PAR::ODD,   // odd parity
-            uart::Parity::Even => Mode::PAR::EVEN, // even parity
-        };
-
-        mode += match params.hw_flow_control {
-            true => Mode::MODE::HARD_HAND,
-            false => Mode::MODE::NORMAL,
-        };
-        usart.registers.mr.write(mode);
-        // Set baud rate
-        self.set_baud_rate(usart, params.baud_rate);
-
-        Ok(())
+        self.configure_uart(
+            Some(params.baud_rate),
+            Some(params.width),
+            Some(params.parity),
+            Some(params.stop_bits),
+            Some(params.hw_flow_control),
+        )
+        .map(|_| ())
     }
 }
 
 impl<'a> hil::uart::Configuration for USART<'a> {
     fn get_baud_rate(&self) -> u32 {
-        unimplemented!()
+        let usart = USARTRegManager::new(&self);
+        let brgr = usart.registers.brgr.extract();
+        Self::calculate_uart_baud(
+            usart.registers.mr.read(Mode::OVER),
+            self.pm.get_system_frequency(),
+            brgr.read(BaudRate::CD),
+            brgr.read(BaudRate::FP),
+        )
     }
-    fn get_width(&self) -> hil::uart::Width {
-        unimplemented!()
+    fn get_width(&self) -> uart::Width {
+        let usart = USARTRegManager::new(&self);
+        let mr = usart.registers.mr.get();
+        if Mode::MODE9.is_set(mr) {
+            return uart::Width::Nine;
+        }
+        if Mode::CHRL::BITS6.matches_all(mr) {
+            return uart::Width::Six;
+        }
+        if Mode::CHRL::BITS7.matches_all(mr) {
+            return uart::Width::Seven;
+        }
+        if Mode::CHRL::BITS8.matches_all(mr) {
+            return uart::Width::Eight;
+        }
+        unimplemented!() // not sure what to do if none match
     }
-    fn get_parity(&self) -> hil::uart::Parity {
-        unimplemented!()
+    fn get_parity(&self) -> uart::Parity {
+        let usart = USARTRegManager::new(&self);
+        let mr = usart.registers.mr.get();
+        if Mode::PAR::NONE.matches_all(mr) {
+            return uart::Parity::None;
+        }
+        if Mode::PAR::EVEN.matches_all(mr) {
+            return uart::Parity::Even;
+        }
+        if Mode::PAR::ODD.matches_all(mr) {
+            return uart::Parity::Odd;
+        }
+        unimplemented!() // not sure what to do if none match
     }
     fn get_stop_bits(&self) -> hil::uart::StopBits {
-        unimplemented!()
+        let usart = USARTRegManager::new(&self);
+        let mr = usart.registers.mr.get();
+        if Mode::NBSTOP::BITS_1_1.matches_all(mr) {
+            return uart::StopBits::One;
+        }
+        if Mode::NBSTOP::BITS_2_2.matches_all(mr) {
+            return uart::StopBits::Two;
+        }
+        unimplemented!() // not sure what to do if none match
     }
     fn get_flow_control(&self) -> bool {
-        unimplemented!()
+        let usart = USARTRegManager::new(&self);
+        usart.registers.mr.matches_all(Mode::MODE::HARD_HAND)
     }
-    fn get_configuration(&self) -> hil::uart::Parameters {
-        unimplemented!()
+    fn get_configuration(&self) -> uart::Parameters {
+        // TODO: this is inneficient as it does many reads and creates many Reg managers
+        uart::Parameters {
+            baud_rate: self.get_baud_rate(),
+            width: self.get_width(),
+            parity: self.get_parity(),
+            stop_bits: self.get_stop_bits(),
+            hw_flow_control: self.get_flow_control(),
+        }
     }
 }
 
