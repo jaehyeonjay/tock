@@ -360,6 +360,7 @@ pub enum USARTStateTX {
     Idle,
     DMA_Transmitting,
     Transfer_Completing, // DMA finished, but not all bytes sent
+    Aborted(usize, Result<(), ErrorCode>, uart::Error), // amount that was left, rval
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -531,7 +532,7 @@ impl<'a> USART<'a> {
             self.disable_rx(usart);
 
             let remaining = rx_dma.transfer_counter();
-            rx_dma.abort(); // set counter to 0 -> stop recieving and emit interrupt
+            rx_dma.abort_transfer(); // set counter to 0 -> stop recieving and emit interrupt
 
             if remaining == 0 {
                 uart::AbortResult::Callback(false) // transfer was already complete
@@ -545,30 +546,31 @@ impl<'a> USART<'a> {
         }
     }
 
-    fn abort_tx(&self, usart: &USARTRegManager, rcode: Result<(), ErrorCode>) {
-        if self.usart_tx_state.get() == USARTStateTX::DMA_Transmitting {
+    fn abort_tx(
+        &self, 
+        usart: &USARTRegManager, 
+        rcode: Result<(), ErrorCode>,
+        error: uart::Error,
+    ) -> uart::AbortResult {
+        if let (Some(tx_dma), USARTStateTX::DMA_Transmitting) =
+            (self.tx_dma.get(), self.usart_tx_state.get())
+        {
             self.disable_tx_interrupts(usart);
             self.disable_tx(usart);
-            self.usart_tx_state.set(USARTStateTX::Idle);
 
             // get buffer
-            let mut length = 0;
-            let mut buffer = self.tx_dma.get().and_then(|tx_dma| {
-                length = self.tx_len.get() - tx_dma.transfer_counter();
-                let buf = tx_dma.abort_transfer();
-                tx_dma.disable();
-                buf
-            });
-            self.tx_len.set(0);
+            let remaining = tx_dma.transfer_counter();
+            tx_dma.abort_transfer();
 
-            // alert client
-            self.client.map(|usartclient| {
-                if let UsartClient::Uart(_rx, Some(tx)) = usartclient {
-                    buffer
-                        .take()
-                        .map(|buf| tx.transmitted_buffer(buf, length, rcode));
-                }
-            });
+            if remaining == 0 {
+                return uart::AbortResult::Callback(false);
+            } else {
+                self.usart_tx_state
+                    .set(USARTStateTX::Aborted(remaining, rcode, error));
+                return uart::AbortResult::Callback(true);
+            }
+        } else {
+            return uart::AbortResult::NoCallback;
         }
     }
 
@@ -617,7 +619,7 @@ impl<'a> USART<'a> {
             .write(Control::RSTSTA::SET + Control::RSTTX::SET + Control::RSTRX::SET);
 
         self.abort_rx(usart, Err(ErrorCode::FAIL), uart::Error::ResetError);
-        self.abort_tx(usart, Err(ErrorCode::FAIL));
+        self.abort_tx(usart, Err(ErrorCode::FAIL), uart::Error::ResetError);
     }
 
     pub fn handle_interrupt(&self) {
@@ -985,7 +987,11 @@ impl<'a> hil::uart::Transmit<'a> for USART<'a> {
     }
 
     fn transmit_abort(&self) -> hil::uart::AbortResult {
-        unimplemented!()
+        self.abort_tx(
+            &USARTRegManager::new(&self),
+            Err(ErrorCode::CANCEL),
+            uart::Error::Aborted,
+        )
     }
 }
 
