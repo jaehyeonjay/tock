@@ -308,4 +308,17 @@ impl DMAChannel {
     pub fn transfer_counter(&self) -> usize {
         self.registers.tcr.read(TransferCounter::TCV) as usize
     }
+
+    pub fn abort(&self) {
+        self.registers.tcr.write(TransferCounter::TCV.val(0));
+    }
+
+    pub fn retrieve_buffer(&self) -> Option<&'static mut [u8]> {
+        // can only take buffer if transfer is complete
+        self.registers
+            .isr
+            .is_set(Interrupt::TRC)
+            .then(|| self.buffer.take())
+            .flatten()
+    }
 }
