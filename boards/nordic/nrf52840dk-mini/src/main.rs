@@ -236,6 +236,7 @@ pub unsafe fn main() {
     };
 
     debug!("Initialization complete. Entering main loop\r");
+    
     debug!("Second print\r");
     debug!("{}", &nrf52840::ficr::FICR_INSTANCE);
 
