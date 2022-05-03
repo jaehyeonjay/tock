@@ -360,7 +360,7 @@ pub enum USARTStateTX {
     Idle,
     DMA_Transmitting,
     Transfer_Completing, // DMA finished, but not all bytes sent
-    Aborted(usize, Result<(), ErrorCode>, uart::Error), // amount that was left, rval
+    Aborted(usize, Result<(), ErrorCode>, uart::Error),
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -555,15 +555,20 @@ impl<'a> USART<'a> {
         if let (Some(tx_dma), USARTStateTX::DMA_Transmitting) =
             (self.tx_dma.get(), self.usart_tx_state.get())
         {
+            /*
+            if usart.registers.imr.extract().is_set(Interrupt::TXEMPTY) {
+                return uart::AbortResult::Callback(false)
+            }
+            */
+
             self.disable_tx_interrupts(usart);
             self.disable_tx(usart);
 
-            // get buffer
             let remaining = tx_dma.transfer_counter();
-            tx_dma.abort_transfer();
+            tx_dma.abort_transfer(); // QUESTION: we don't save the returned buffer
 
             if remaining == 0 {
-                return uart::AbortResult::Callback(false);
+                return uart::AbortResult::Callback(false)
             } else {
                 self.usart_tx_state
                     .set(USARTStateTX::Aborted(remaining, rcode, error));
@@ -983,7 +988,30 @@ impl<'a> hil::uart::Transmit<'a> for USART<'a> {
     }
 
     fn transmit_character(&self, character: u32) -> Result<(), ErrorCode> {
-        unimplemented!()
+        if self.usart_mode.get() != UsartMode::Uart {
+            Err(ErrorCode::OFF)
+        } else if self.usart_tx_state.get() != USARTStateTX::Idle {
+            Err(ErrorCode::BUSY)
+        } else {
+            let usart = &USARTRegManager::new(&self);
+            // enable TX
+            self.enable_tx(usart);
+            self.usart_tx_state.set(USARTStateTX::DMA_Transmitting);
+
+            // set up dma transfer and start transmission
+            match self.tx_dma.get() {
+                Some(dma) => {
+                    dma.enable();
+                    self.tx_len.set(tx_len);
+                    dma.do_transfer(self.tx_dma_peripheral, tx_buffer, tx_len);
+                    Ok(())
+                }
+                None => Err(ErrorCode::OFF), 
+                // note: in the design doc, it says you should always pass 
+                // buffers back. dont have buffers here so i got rid of it
+            }
+        }
+        //unimplemented!()
     }
 
     fn transmit_abort(&self) -> hil::uart::AbortResult {

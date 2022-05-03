@@ -312,8 +312,10 @@ pub unsafe fn main() {
     // -pal, 11/20/18
     //
     //test::virtual_uart_rx_test::run_virtual_uart_receive(uart_mux);
-    debug!("Initialization complete. Entering main loop");
-    debug!("A second line");
+    use kernel::hil::uart::Transmit;
+    debug!("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    peripherals.usart3.transmit_abort();
+    debug!("done");
 
     /// These symbols are defined in the linker script.
     extern "C" {
