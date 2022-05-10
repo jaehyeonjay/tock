@@ -13,6 +13,7 @@ use kernel::component::Component;
 use kernel::dynamic_deferred_call::{DynamicDeferredCall, DynamicDeferredCallClientState};
 use kernel::hil::led::LedLow;
 use kernel::hil::time::Counter;
+use kernel::hil::uart::Transmit;
 use kernel::platform::{KernelResources, SyscallDriverLookup};
 use kernel::scheduler::round_robin::RoundRobinSched;
 #[allow(unused_imports)]
@@ -234,11 +235,48 @@ pub unsafe fn main() {
         scheduler,
         systick: cortexm4::systick::SysTick::new_with_calibration(64000000),
     };
-
+    debug!("Start test\r\n");
+    for i in 0..100000000 {}
     debug!("Initialization complete. Entering main loop\r");
-    
-    debug!("Second print\r");
+    let result = base_peripherals.uarte0.transmit_abort();
+
+    match result {
+        uart::AbortResult::Callback(s) => match s {
+            true => debug!("result of abort was Callback(true)\r"),
+            false => debug!("result of abort was Callback(false)\r"),
+        },
+        uart::AbortResult::NoCallback => debug!("result of abort was NoCallback\r"),
+    }
+    let result = base_peripherals.uarte0.transmit_abort();
+
+    match result {
+        uart::AbortResult::Callback(s) => match s {
+            true => debug!("result of abort was Callback(true)\r"),
+            false => debug!("result of abort was Callback(false)\r"),
+        },
+        uart::AbortResult::NoCallback => debug!("result of abort was NoCallback\r"),
+    }
+    debug!("hhvQppPyveGrN3mFP6dfr9dUetMgvhCA1GQQKFZDbENueIeftf7exEIJWxBdsL2AQN2L1KZpXWjSg7398WgKqXu5OlgYIzs0fW2zHgxAXE8WmUtIwnYnLDswgTSke1pKcl3y7Q8rTqJv8PgK20q2bzbMTD3Dk2M6sQtNdGNsiOJPpEg24U3rtXFWer1R18baw8ojestVIFfYg9cSjLJS0VQXGnxKOUvW62EHl2ME1uenpZnHKDM3smQkXWSpwRBhO\r");
+    let result = base_peripherals.uarte0.transmit_abort();
+    match result {
+        uart::AbortResult::Callback(s) => match s {
+            true => debug!("result of abort was Callback(true)\r"),
+            false => debug!("result of abort was Callback(false)\r"),
+        },
+        uart::AbortResult::NoCallback => debug!("result of abort was NoCallback\r"),
+    }
+
     debug!("{}", &nrf52840::ficr::FICR_INSTANCE);
+    let result = base_peripherals.uarte0.transmit_abort();
+    match result {
+        uart::AbortResult::Callback(s) => match s {
+            true => debug!("result of abort was Callback(true)\r"),
+            false => debug!("result of abort was Callback(false)\r"),
+        },
+        uart::AbortResult::NoCallback => debug!("result of abort was NoCallback\r"),
+    }
+
+    debug!("end test\r\n");
 
     /// These symbols are defined in the linker script.
     extern "C" {

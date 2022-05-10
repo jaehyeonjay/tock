@@ -304,17 +304,9 @@ impl<'a> Uarte<'a> {
                 None => return,
                 Some(r) => r,
             };
-
-            // All bytes have been transmitted
-            if rem == 0 {
-                // Signal client write done
-                self.tx_client.map(|client| {
-                    self.tx_buffer.take().map(|tx_buffer| {
-                        client.transmitted_buffer(tx_buffer, self.tx_len.get(), Ok(()));
-                    });
-                });
-            } else if self.registers.event_txstopped.is_set(Event::READY) {
+            if self.registers.event_txstopped.is_set(Event::READY) {
                 // transmission was aborted, let client know
+                self.registers.event_txstopped.write(Event::READY::CLEAR);
                 self.tx_client.map(|client| {
                     self.tx_buffer.take().map(|tx_buffer| {
                         client.transmitted_buffer(
@@ -322,6 +314,14 @@ impl<'a> Uarte<'a> {
                             self.tx_len.get(),
                             Err(ErrorCode::CANCEL),
                         );
+                    });
+                });
+            } else if rem == 0 {
+                // All bytes have been transmitted
+                // Signal client write done
+                self.tx_client.map(|client| {
+                    self.tx_buffer.take().map(|tx_buffer| {
+                        client.transmitted_buffer(tx_buffer, self.tx_len.get(), Ok(()));
                     });
                 });
             } else {
@@ -335,6 +335,7 @@ impl<'a> Uarte<'a> {
                 self.registers.task_starttx.write(Task::ENABLE::SET);
                 self.enable_tx_interrupts();
             }
+            self.enable_tx_interrupts()
         }
 
         if self.rx_ready() {
@@ -505,6 +506,12 @@ impl<'a> hil::uart::Transmit<'a> for Uarte<'a> {
         } else if self.tx_remaining_bytes.get() == 0 {
             // transmit finished, but has not called callback (so tx_ready() is false)
             // should not abort here  (since just waiting for callback to be invoked)
+
+            // should never hit this case, since tx_remaining_bytes gets decremented in
+            // the interrupt handler, it will always call the callback after decrementing down
+            // to 0. So tx_remaining_bytes cannot be 0 AND the callback not have been called.
+
+            // this is essentially here  just to fulfil the hil, unsure if needed.
             hil::uart::AbortResult::Callback(false)
         } else {
             //stop the transmission
