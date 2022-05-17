@@ -314,7 +314,6 @@ pub unsafe fn main() {
     //test::virtual_uart_rx_test::run_virtual_uart_receive(uart_mux);
     use kernel::hil::uart::Transmit;
     debug!("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
-    peripherals.usart3.transmit_abort();
     debug!("done");
 
     /// These symbols are defined in the linker script.
@@ -373,7 +372,10 @@ impl<'a> kernel::hil::uart::ReceiveClient for Echo<'a> {
         error: kernel::hil::uart::Error,
     ) {
         use kernel::hil::uart::Receive;
-        debug!("Received {:?}", &rx_buffer[..rx_len]);
+        debug!(
+            "Received {:?}",
+            core::str::from_utf8(&rx_buffer[..rx_len]).unwrap_or("<INVALID STR>")
+        );
         self.uart.receive_buffer(rx_buffer, 4);
         if let Err(e) = rval {
             debug!("Error: {:?}", e);

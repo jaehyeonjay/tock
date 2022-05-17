@@ -10,9 +10,7 @@ use kernel::hil::spi;
 use kernel::hil::uart;
 use kernel::utilities::cells::OptionalCell;
 use kernel::utilities::registers::interfaces::{ReadWriteable, Readable, Writeable};
-use kernel::utilities::registers::{
-    register_bitfields, FieldValue, ReadOnly, ReadWrite, WriteOnly,
-};
+use kernel::utilities::registers::{register_bitfields, ReadOnly, ReadWrite, WriteOnly};
 use kernel::utilities::StaticRef;
 use kernel::ErrorCode;
 
@@ -351,6 +349,7 @@ impl Drop for USARTRegManager<'_> {
 pub enum USARTStateRX {
     Idle,
     DMA_Receiving,
+    Character_Receiving,
     Aborted(usize, Result<(), ErrorCode>, uart::Error), // amount that was left, rval, error
 }
 
@@ -547,8 +546,8 @@ impl<'a> USART<'a> {
     }
 
     fn abort_tx(
-        &self, 
-        usart: &USARTRegManager, 
+        &self,
+        usart: &USARTRegManager,
         rcode: Result<(), ErrorCode>,
         error: uart::Error,
     ) -> uart::AbortResult {
@@ -568,7 +567,7 @@ impl<'a> USART<'a> {
             tx_dma.abort_transfer(); // QUESTION: we don't save the returned buffer
 
             if remaining == 0 {
-                return uart::AbortResult::Callback(false)
+                return uart::AbortResult::Callback(false);
             } else {
                 self.usart_tx_state
                     .set(USARTStateTX::Aborted(remaining, rcode, error));
@@ -592,6 +591,10 @@ impl<'a> USART<'a> {
             .registers
             .ier
             .write(Interrupt::PARE::SET + Interrupt::FRAME::SET + Interrupt::OVRE::SET);
+    }
+
+    fn enable_rx_ready_interrupt(&self, usart: &USARTRegManager) {
+        usart.registers.ier.write(Interrupt::RXRDY::SET);
     }
 
     fn disable_rx_interrupts(&self, usart: &USARTRegManager) {
@@ -695,6 +698,17 @@ impl<'a> USART<'a> {
                     }
                 }
             });
+        } else if status.is_set(ChannelStatus::RXRDY) && mask.is_set(Interrupt::RXRDY) {
+            self.disable_rx_interrupts(usart);
+            self.disable_rx(usart);
+            self.usart_rx_state.set(USARTStateRX::Idle);
+
+            let char = usart.registers.rhr.read(ReceiverHold::RXCHR);
+            self.client.map(|client| {
+                if let UsartClient::Uart(Some(client), _) = client {
+                    client.received_character(char, Ok(()), uart::Error::None);
+                }
+            });
         } else if status.is_set(ChannelStatus::PARE) {
             self.abort_rx(usart, Err(ErrorCode::FAIL), uart::Error::ParityError);
         } else if status.is_set(ChannelStatus::FRAME) {
@@ -747,7 +761,10 @@ impl<'a> USART<'a> {
         }
 
         let usart = &USARTRegManager::new(&self);
-        let mut mode = <FieldValue<u32, _>>::new(0u32, 0, 0u32); // create a blank field value
+        let mut mode = match hw_flow_control {
+            Some(true) => Mode::MODE::HARD_HAND,
+            _ => Mode::MODE::NORMAL,
+        };
 
         if let Some(width) = width {
             mode += Mode::MODE9::CLEAR;
@@ -772,13 +789,6 @@ impl<'a> USART<'a> {
             mode += match stop_bits {
                 uart::StopBits::One => Mode::NBSTOP::BITS_1_1,
                 uart::StopBits::Two => Mode::NBSTOP::BITS_2_2,
-            };
-        }
-
-        if let Some(hw_flow_control) = hw_flow_control {
-            mode += match hw_flow_control {
-                true => Mode::MODE::HARD_HAND,
-                false => Mode::MODE::NORMAL,
             };
         }
 
@@ -905,7 +915,7 @@ impl dma::DMAClient for USART<'_> {
                                     USARTStateRX::DMA_Receiving => {
                                         (length, Ok(()), uart::Error::None)
                                     }
-                                    USARTStateRX::Idle => unreachable!(),
+                                    _ => unreachable!(),
                                 };
                                 rx.received_buffer(buf, rx_len, rval, error);
                             }
@@ -988,30 +998,30 @@ impl<'a> hil::uart::Transmit<'a> for USART<'a> {
     }
 
     fn transmit_character(&self, character: u32) -> Result<(), ErrorCode> {
-        if self.usart_mode.get() != UsartMode::Uart {
-            Err(ErrorCode::OFF)
-        } else if self.usart_tx_state.get() != USARTStateTX::Idle {
-            Err(ErrorCode::BUSY)
-        } else {
-            let usart = &USARTRegManager::new(&self);
-            // enable TX
-            self.enable_tx(usart);
-            self.usart_tx_state.set(USARTStateTX::DMA_Transmitting);
+        // if self.usart_mode.get() != UsartMode::Uart {
+        //     Err(ErrorCode::OFF)
+        // } else if self.usart_tx_state.get() != USARTStateTX::Idle {
+        //     Err(ErrorCode::BUSY)
+        // } else {
+        //     let usart = &USARTRegManager::new(&self);
+        //     // enable TX
+        //     self.enable_tx(usart);
+        //     self.usart_tx_state.set(USARTStateTX::DMA_Transmitting);
 
-            // set up dma transfer and start transmission
-            match self.tx_dma.get() {
-                Some(dma) => {
-                    dma.enable();
-                    self.tx_len.set(tx_len);
-                    dma.do_transfer(self.tx_dma_peripheral, tx_buffer, tx_len);
-                    Ok(())
-                }
-                None => Err(ErrorCode::OFF), 
-                // note: in the design doc, it says you should always pass 
-                // buffers back. dont have buffers here so i got rid of it
-            }
-        }
-        //unimplemented!()
+        //     // set up dma transfer and start transmission
+        //     match self.tx_dma.get() {
+        //         Some(dma) => {
+        //             dma.enable();
+        //             self.tx_len.set(tx_len);
+        //             dma.do_transfer(self.tx_dma_peripheral, tx_buffer, tx_len);
+        //             Ok(())
+        //         }
+        //         None => Err(ErrorCode::OFF),
+        //         // note: in the design doc, it says you should always pass
+        //         // buffers back. dont have buffers here so i got rid of it
+        //     }
+        // }
+        unimplemented!()
     }
 
     fn transmit_abort(&self) -> hil::uart::AbortResult {
@@ -1038,7 +1048,10 @@ impl<'a> hil::uart::Receive<'a> for USART<'a> {
         rx_buffer: &'static mut [u8],
         rx_len: usize,
     ) -> Result<(), (ErrorCode, &'static mut [u8])> {
-        if self.usart_rx_state.get() == USARTStateRX::DMA_Receiving {
+        if self.usart_mode.get() != UsartMode::Uart {
+            return Err((ErrorCode::OFF, rx_buffer));
+        }
+        if self.usart_rx_state.get() != USARTStateRX::Idle {
             return Err((ErrorCode::BUSY, rx_buffer));
         }
         if rx_len > rx_buffer.len() {
@@ -1061,7 +1074,16 @@ impl<'a> hil::uart::Receive<'a> for USART<'a> {
     }
 
     fn receive_character(&self) -> Result<(), ErrorCode> {
-        unimplemented!()
+        if self.usart_mode.get() != UsartMode::Uart {
+            return Err(ErrorCode::OFF);
+        }
+        if self.usart_rx_state.get() != USARTStateRX::Idle {
+            return Err(ErrorCode::BUSY);
+        }
+        let usart = &USARTRegManager::new(&self);
+        self.enable_rx_ready_interrupt(usart);
+        self.enable_rx(usart);
+        Ok(())
     }
 
     fn receive_abort(&self) -> hil::uart::AbortResult {
@@ -1113,69 +1135,64 @@ impl<'a> hil::uart::Configure for USART<'a> {
 
 impl<'a> hil::uart::Configuration for USART<'a> {
     fn get_baud_rate(&self) -> u32 {
+        self.get_configuration().baud_rate
+    }
+    fn get_width(&self) -> uart::Width {
+        self.get_configuration().width
+    }
+    fn get_parity(&self) -> uart::Parity {
+        self.get_configuration().parity
+    }
+    fn get_stop_bits(&self) -> hil::uart::StopBits {
+        self.get_configuration().stop_bits
+    }
+    fn get_flow_control(&self) -> bool {
+        self.get_configuration().hw_flow_control
+    }
+    fn get_configuration(&self) -> uart::Parameters {
         let usart = USARTRegManager::new(&self);
+        let mr = usart.registers.mr.extract();
+
         let brgr = usart.registers.brgr.extract();
-        Self::calculate_uart_baud(
-            usart.registers.mr.read(Mode::OVER),
+        let baud_rate = Self::calculate_uart_baud(
+            mr.read(Mode::OVER),
             self.pm.get_system_frequency(),
             brgr.read(BaudRate::CD),
             brgr.read(BaudRate::FP),
-        )
-    }
-    fn get_width(&self) -> uart::Width {
-        let usart = USARTRegManager::new(&self);
-        let mr = usart.registers.mr.get();
-        if Mode::MODE9.is_set(mr) {
-            return uart::Width::Nine;
-        }
-        if Mode::CHRL::BITS6.matches_all(mr) {
-            return uart::Width::Six;
-        }
-        if Mode::CHRL::BITS7.matches_all(mr) {
-            return uart::Width::Seven;
-        }
-        if Mode::CHRL::BITS8.matches_all(mr) {
-            return uart::Width::Eight;
-        }
-        unimplemented!() // not sure what to do if none match
-    }
-    fn get_parity(&self) -> uart::Parity {
-        let usart = USARTRegManager::new(&self);
-        let mr = usart.registers.mr.get();
-        if Mode::PAR::NONE.matches_all(mr) {
-            return uart::Parity::None;
-        }
-        if Mode::PAR::EVEN.matches_all(mr) {
-            return uart::Parity::Even;
-        }
-        if Mode::PAR::ODD.matches_all(mr) {
-            return uart::Parity::Odd;
-        }
-        unimplemented!() // not sure what to do if none match
-    }
-    fn get_stop_bits(&self) -> hil::uart::StopBits {
-        let usart = USARTRegManager::new(&self);
-        let mr = usart.registers.mr.get();
-        if Mode::NBSTOP::BITS_1_1.matches_all(mr) {
-            return uart::StopBits::One;
-        }
-        if Mode::NBSTOP::BITS_2_2.matches_all(mr) {
-            return uart::StopBits::Two;
-        }
-        unimplemented!() // not sure what to do if none match
-    }
-    fn get_flow_control(&self) -> bool {
-        let usart = USARTRegManager::new(&self);
-        usart.registers.mr.matches_all(Mode::MODE::HARD_HAND)
-    }
-    fn get_configuration(&self) -> uart::Parameters {
-        // TODO: this is inneficient as it does many reads and creates many Reg managers
+        );
+
+        let width = if mr.is_set(Mode::MODE9) {
+            uart::Width::Nine
+        } else {
+            match mr.read_as_enum(Mode::CHRL) {
+                Some(Mode::CHRL::Value::BITS6) => uart::Width::Six,
+                Some(Mode::CHRL::Value::BITS7) => uart::Width::Seven,
+                Some(Mode::CHRL::Value::BITS8) => uart::Width::Eight,
+                _ => unimplemented!(), // unsure what to do here
+            }
+        };
+
+        let parity = match mr.read_as_enum(Mode::PAR) {
+            Some(Mode::PAR::Value::NONE) => uart::Parity::None,
+            Some(Mode::PAR::Value::ODD) => uart::Parity::Odd,
+            Some(Mode::PAR::Value::EVEN) => uart::Parity::Even,
+            _ => unimplemented!(),
+        };
+
+        let stop_bits = match mr.read_as_enum(Mode::NBSTOP) {
+            Some(Mode::NBSTOP::Value::BITS_1_1) => uart::StopBits::One,
+            Some(Mode::NBSTOP::Value::BITS_2_2) => uart::StopBits::One,
+            _ => unimplemented!(),
+        };
+
+        let hw_flow_control = mr.matches_all(Mode::MODE::HARD_HAND);
+
         uart::Parameters {
-            baud_rate: self.get_baud_rate(),
-            width: self.get_width(),
-            parity: self.get_parity(),
-            stop_bits: self.get_stop_bits(),
-            hw_flow_control: self.get_flow_control(),
+            baud_rate,
+            width,
+            parity,
+            stop_bits,
+            hw_flow_control,
         }
     }
 }
