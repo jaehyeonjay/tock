@@ -7,7 +7,7 @@ use core::cmp;
 use core::sync::atomic::{AtomicBool, Ordering};
 use kernel::hil;
 use kernel::hil::spi;
-use kernel::hil::uart;
+use kernel::hil::uart::{self, Parameters, Configuration};
 use kernel::utilities::cells::OptionalCell;
 use kernel::utilities::registers::interfaces::{ReadWriteable, Readable, Writeable};
 use kernel::utilities::registers::{
@@ -565,17 +565,17 @@ impl<'a> USART<'a> {
             self.disable_tx(usart);
 
             let remaining = tx_dma.transfer_counter();
-            tx_dma.abort_transfer(); // QUESTION: we don't save the returned buffer
+            tx_dma.abort_transfer(); 
 
             if remaining == 0 {
-                return uart::AbortResult::Callback(false)
+                uart::AbortResult::Callback(false)
             } else {
                 self.usart_tx_state
                     .set(USARTStateTX::Aborted(remaining, rcode, error));
-                return uart::AbortResult::Callback(true);
+                uart::AbortResult::Callback(true)
             }
         } else {
-            return uart::AbortResult::NoCallback;
+            uart::AbortResult::NoCallback
         }
     }
 
@@ -640,6 +640,7 @@ impl<'a> USART<'a> {
             self.disable_tx_empty_interrupt(usart);
             self.disable_tx(usart);
             self.usart_tx_state.set(USARTStateTX::Idle);
+
 
             // Now that we know the TX transaction is finished we can get the
             // buffer back from DMA and pass it back to the client. If we don't
@@ -858,7 +859,7 @@ impl<'a> USART<'a> {
         usart.registers.idr.write(Interrupt::TIMEOUT::SET);
     }
 
-    // for use by panic in io.rs
+    // for use by panic in io.rs QUESTION: can i repurpose this function
     pub fn send_byte(&self, usart: &USARTRegManager, byte: u8) {
         usart
             .registers
@@ -916,10 +917,49 @@ impl dma::DMAClient for USART<'_> {
 
                     // note that the DMA has finished but TX cannot yet be disabled yet because
                     // there may still be bytes left in the TX buffer.
-                    self.usart_tx_state.set(USARTStateTX::Transfer_Completing);
-                    self.enable_tx_empty_interrupt(usart);
+                    
+                    // TODO:
+                    // todo: if you are done done do this:
+                    // note: we had a new abort state but here it changes back to
+                    // transfer completing
+                    let status = usart.registers.csr.extract();
+
+                    if status.is_set(ChannelStatus::TXEMPTY) {
+                        self.usart_tx_state.set(USARTStateTX::Transfer_Completing);
+                        self.enable_tx_empty_interrupt(usart);
+                    } else {
+                        let old_state = self.usart_tx_state.replace(USARTStateTX::Idle);
+
+                        let txbuffer = self.tx_dma.get().and_then(|tx_dma| {
+                            let buf = tx_dma.retrieve_buffer();
+                            tx_dma.disable();
+                            buf
+                        });
+
+                        // alert client
+                        self.client.map(|usartclient| {
+                            if let UsartClient::Uart(_rx, Some(tx)) = usartclient {
+                                    if let Some(buf) = txbuffer {
+                                        let length = self.tx_len.get();
+                                        let (tx_len, rval, error) = match old_state {
+                                            USARTStateTX::Aborted(unsent, rval, error) => {
+                                                (length - unsent, rval, error)
+                                            }
+                                            USARTStateTX::DMA_Transmitting => {
+                                                (length, Ok(()), uart::Error::None)
+                                            }
+                                            USARTStateTX::Transfer_Completing => {
+                                                (length, Ok(()), uart::Error::None)
+                                            },
+                                            USARTStateTX::Idle => unreachable!(),
+                                        };
+                                        tx.transmitted_buffer(buf, tx_len, rval);
+                                    }
+                                }
+                            });
+                        }
+                    }
                 }
-            }
 
             UsartMode::Spi => {
                 if (self.usart_rx_state.get() == USARTStateRX::Idle
@@ -998,20 +1038,18 @@ impl<'a> hil::uart::Transmit<'a> for USART<'a> {
             self.enable_tx(usart);
             self.usart_tx_state.set(USARTStateTX::DMA_Transmitting);
 
-            // set up dma transfer and start transmission
-            match self.tx_dma.get() {
-                Some(dma) => {
-                    dma.enable();
-                    self.tx_len.set(tx_len);
-                    dma.do_transfer(self.tx_dma_peripheral, tx_buffer, tx_len);
-                    Ok(())
-                }
-                None => Err(ErrorCode::OFF), 
-                // note: in the design doc, it says you should always pass 
-                // buffers back. dont have buffers here so i got rid of it
-            }
+            // ignore bits to fit character width
+            let bits_to_ignore = 4294967295 ^ (4294967295 << self.get_width() as u32);
+            let to_send = bits_to_ignore & character;
+
+            // put character in register, than change states
+            usart.registers
+                .thr
+                .write(TransmitHold::TXCHR.val(to_send));
+            
+            self.usart_tx_state.set(USARTStateTX::Transfer_Completing);
+            Ok(())
         }
-        //unimplemented!()
     }
 
     fn transmit_abort(&self) -> hil::uart::AbortResult {

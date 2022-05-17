@@ -312,10 +312,14 @@ pub unsafe fn main() {
     // -pal, 11/20/18
     //
     //test::virtual_uart_rx_test::run_virtual_uart_receive(uart_mux);
+    //debug!("hello");
+    //debug!("second");
+    //debug!("third");
     use kernel::hil::uart::Transmit;
-    debug!("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
-    peripherals.usart3.transmit_abort();
-    debug!("done");
+    let character = 0xffff41;
+    peripherals.usart3.set_width(hil::uart::Width::Eight);
+    peripherals.usart3.transmit_character(character);
+    peripherals.usart3.transmit_character(character);
 
     /// These symbols are defined in the linker script.
     extern "C" {
