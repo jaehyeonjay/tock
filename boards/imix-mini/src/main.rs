@@ -376,7 +376,23 @@ impl<'a> kernel::hil::uart::ReceiveClient for Echo<'a> {
             "Received {:?}",
             core::str::from_utf8(&rx_buffer[..rx_len]).unwrap_or("<INVALID STR>")
         );
-        self.uart.receive_buffer(rx_buffer, 4);
+        self.uart.receive_character();
+        if let Err(e) = rval {
+            debug!("Error: {:?}", e);
+        }
+        // } else {
+        //     self.uart.receive_abort();
+        // }
+    }
+
+    fn received_character(
+        &self,
+        character: u32,
+        rval: Result<(), kernel::ErrorCode>,
+        error: kernel::hil::uart::Error,
+    ) {
+        debug!("Received char: {:?}", character);
+        self.uart.receive_character();
         if let Err(e) = rval {
             debug!("Error: {:?}", e);
         } else {

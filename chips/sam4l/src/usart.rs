@@ -8,7 +8,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use kernel::hil;
 use kernel::hil::spi;
 use kernel::hil::uart;
-use kernel::utilities::cells::OptionalCell;
+use kernel::utilities::cells::{OptionalCell, TakeCell};
 use kernel::utilities::registers::interfaces::{ReadWriteable, Readable, Writeable};
 use kernel::utilities::registers::{register_bitfields, ReadOnly, ReadWrite, WriteOnly};
 use kernel::utilities::StaticRef;
@@ -346,11 +346,17 @@ impl Drop for USARTRegManager<'_> {
 
 #[derive(Copy, Clone, PartialEq)]
 #[allow(non_camel_case_types)]
+pub enum TransferType {
+    Buffer_Transfer,
+    Character_Transfer,
+}
+
+#[derive(Copy, Clone, PartialEq)]
+#[allow(non_camel_case_types)]
 pub enum USARTStateRX {
     Idle,
-    DMA_Receiving,
-    Character_Receiving,
-    Aborted(usize, Result<(), ErrorCode>, uart::Error), // amount that was left, rval, error
+    DMA_Receiving(TransferType),
+    Aborted(TransferType, usize, Result<(), ErrorCode>, uart::Error), // previous type, amount that was left, rval, error
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -398,6 +404,8 @@ pub struct USART<'a> {
 
     spi_chip_select: OptionalCell<&'a dyn hil::gpio::Pin>,
     pm: &'a pm::PowerManager,
+
+    rx_char_buf: TakeCell<'static, [u8]>,
 }
 
 impl<'a> USART<'a> {
@@ -431,6 +439,8 @@ impl<'a> USART<'a> {
             // This is only used if the USART is in SPI mode.
             spi_chip_select: OptionalCell::empty(),
             pm,
+
+            rx_char_buf: TakeCell::empty(),
         }
     }
 
@@ -479,6 +489,10 @@ impl<'a> USART<'a> {
         self.tx_dma.set(Some(tx_dma));
     }
 
+    pub fn set_char_buffer(&self, buf: &'static mut [u8]) {
+        self.rx_char_buf.put(Some(buf))
+    }
+
     pub fn set_mode(&self, mode: UsartMode) {
         if self.usart_mode.get() != UsartMode::Unused {
             // n.b. This may actually "just work", particularly if we reset the
@@ -523,7 +537,7 @@ impl<'a> USART<'a> {
         rcode: Result<(), ErrorCode>,
         error: uart::Error,
     ) -> uart::AbortResult {
-        if let (Some(rx_dma), USARTStateRX::DMA_Receiving) =
+        if let (Some(rx_dma), USARTStateRX::DMA_Receiving(prev_type)) =
             (self.rx_dma.get(), self.usart_rx_state.get())
         {
             self.disable_rx_timeout(usart);
@@ -531,13 +545,13 @@ impl<'a> USART<'a> {
             self.disable_rx(usart);
 
             let remaining = rx_dma.transfer_counter();
-            rx_dma.abort_transfer(); // set counter to 0 -> stop recieving and emit interrupt
+            rx_dma.abort(); // set counter to 0 -> stop recieving and emit interrupt
 
             if remaining == 0 {
                 uart::AbortResult::Callback(false) // transfer was already complete
             } else {
                 self.usart_rx_state
-                    .set(USARTStateRX::Aborted(remaining, rcode, error));
+                    .set(USARTStateRX::Aborted(prev_type, remaining, rcode, error));
                 uart::AbortResult::Callback(true)
             }
         } else {
@@ -591,10 +605,6 @@ impl<'a> USART<'a> {
             .registers
             .ier
             .write(Interrupt::PARE::SET + Interrupt::FRAME::SET + Interrupt::OVRE::SET);
-    }
-
-    fn enable_rx_ready_interrupt(&self, usart: &USARTRegManager) {
-        usart.registers.ier.write(Interrupt::RXRDY::SET);
     }
 
     fn disable_rx_interrupts(&self, usart: &USARTRegManager) {
@@ -696,17 +706,6 @@ impl<'a> USART<'a> {
                         self.tx_len.set(0);
                         client.read_write_done(txbuffer.unwrap(), rxbuf, len, Ok(()));
                     }
-                }
-            });
-        } else if status.is_set(ChannelStatus::RXRDY) && mask.is_set(Interrupt::RXRDY) {
-            self.disable_rx_interrupts(usart);
-            self.disable_rx(usart);
-            self.usart_rx_state.set(USARTStateRX::Idle);
-
-            let char = usart.registers.rhr.read(ReceiverHold::RXCHR);
-            self.client.map(|client| {
-                if let UsartClient::Uart(Some(client), _) = client {
-                    client.received_character(char, Ok(()), uart::Error::None);
                 }
             });
         } else if status.is_set(ChannelStatus::PARE) {
@@ -908,16 +907,32 @@ impl dma::DMAClient for USART<'_> {
                         if let UsartClient::Uart(Some(rx), _tx) = usartclient {
                             if let Some(buf) = buffer {
                                 let length = self.rx_len.get();
-                                let (rx_len, rval, error) = match old_state {
-                                    USARTStateRX::Aborted(unsent, rval, error) => {
-                                        (length - unsent, rval, error)
+                                let (transfer_type, rx_len, mut rval, error) = match old_state {
+                                    USARTStateRX::Aborted(transfer_type, unsent, rval, error) => {
+                                        (transfer_type, length - unsent, rval, error)
                                     }
-                                    USARTStateRX::DMA_Receiving => {
-                                        (length, Ok(()), uart::Error::None)
+                                    USARTStateRX::DMA_Receiving(transfer_type) => {
+                                        (transfer_type, length, Ok(()), uart::Error::None)
                                     }
                                     _ => unreachable!(),
                                 };
-                                rx.received_buffer(buf, rx_len, rval, error);
+                                match transfer_type {
+                                    TransferType::Buffer_Transfer => {
+                                        rx.received_buffer(buf, rx_len, rval, error)
+                                    }
+                                    TransferType::Character_Transfer => {
+                                        let character = match <&[u8; 2]>::try_from(&*buf) {
+                                            Ok(bytes) => ReceiverHold::RXCHR
+                                                .read(u16::from_ne_bytes(*bytes) as u32),
+                                            Err(_) => {
+                                                rval = Err(ErrorCode::FAIL);
+                                                0
+                                            }
+                                        };
+                                        self.rx_char_buf.put(Some(buf));
+                                        rx.received_character(character, rval, error)
+                                    }
+                                }
                             }
                         }
                     });
@@ -1061,11 +1076,13 @@ impl<'a> hil::uart::Receive<'a> for USART<'a> {
 
         // set up dma transfer and start reception
         if let Some(dma) = self.rx_dma.get() {
-            self.usart_rx_state.set(USARTStateRX::DMA_Receiving);
+            self.usart_rx_state
+                .set(USARTStateRX::DMA_Receiving(TransferType::Buffer_Transfer));
             self.enable_rx(usart);
             self.enable_rx_error_interrupts(usart);
             dma.enable();
             self.rx_len.set(rx_len);
+            dma.set_width(dma::DMAWidth::Width8Bit);
             dma.do_transfer(self.rx_dma_peripheral, rx_buffer, rx_len);
             Ok(())
         } else {
@@ -1080,10 +1097,27 @@ impl<'a> hil::uart::Receive<'a> for USART<'a> {
         if self.usart_rx_state.get() != USARTStateRX::Idle {
             return Err(ErrorCode::BUSY);
         }
-        let usart = &USARTRegManager::new(&self);
-        self.enable_rx_ready_interrupt(usart);
-        self.enable_rx(usart);
-        Ok(())
+
+        // set up dma transfer and start reception
+        if let Some(dma) = self.rx_dma.get() {
+            if let Some(buf) = self.rx_char_buf.take() {
+                let usart = &USARTRegManager::new(&self);
+                self.usart_rx_state.set(USARTStateRX::DMA_Receiving(
+                    TransferType::Character_Transfer,
+                ));
+                self.enable_rx(usart);
+                self.enable_rx_error_interrupts(usart);
+                dma.enable();
+                self.rx_len.set(1);
+                dma.set_width(dma::DMAWidth::Width16Bit);
+                dma.do_transfer(self.rx_dma_peripheral, buf, 1);
+                Ok(())
+            } else {
+                Err(ErrorCode::FAIL)
+            }
+        } else {
+            Err(ErrorCode::OFF)
+        }
     }
 
     fn receive_abort(&self) -> hil::uart::AbortResult {
@@ -1197,176 +1231,6 @@ impl<'a> hil::uart::Configuration for USART<'a> {
     }
 }
 
-/// Old Implementation of kernel::uart
-//impl<'a> uart::Receive<'a> for USART<'a> {
-//    fn set_receive_client(&self, client: &'a dyn uart::ReceiveClient) {
-//        if let Some(UsartClient::Uart(_rx, Some(tx))) = self.client.take() {
-//            self.client.set(UsartClient::Uart(Some(client), Some(tx)));
-//        } else {
-//            self.client.set(UsartClient::Uart(Some(client), None));
-//        }
-//    }
-//
-//    fn receive_buffer(
-//        &self,
-//        rx_buffer: &'static mut [u8],
-//        rx_len: usize,
-//    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
-//        if rx_len > rx_buffer.len() {
-//            return Err((ErrorCode::SIZE, rx_buffer));
-//        }
-//        let usart = &USARTRegManager::new(&self);
-//
-//        // enable RX
-//        self.enable_rx(usart);
-//        self.enable_rx_error_interrupts(usart);
-//        self.usart_rx_state.set(USARTStateRX::DMA_Receiving);
-//        // set up dma transfer and start reception
-//        if let Some(dma) = self.rx_dma.get() {
-//            dma.enable();
-//            self.rx_len.set(rx_len);
-//            dma.do_transfer(self.rx_dma_peripheral, rx_buffer, rx_len);
-//            Ok(())
-//        } else {
-//            Err((ErrorCode::OFF, rx_buffer))
-//        }
-//    }
-//
-//    fn receive_abort(&self) -> Result<(), ErrorCode> {
-//        let usart = &USARTRegManager::new(&self);
-//        self.disable_rx_timeout(usart);
-//        self.abort_rx(usart, Err(ErrorCode::CANCEL), uart::Error::Aborted);
-//        Err(ErrorCode::BUSY)
-//    }
-//
-//    fn receive_word(&self) -> Result<(), ErrorCode> {
-//        Err(ErrorCode::FAIL)
-//    }
-//}
-//
-//impl<'a> uart::Transmit<'a> for USART<'a> {
-//    fn transmit_buffer(
-//        &self,
-//        tx_buffer: &'static mut [u8],
-//        tx_len: usize,
-//    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
-//        if self.usart_tx_state.get() != USARTStateTX::Idle {
-//            Err((ErrorCode::BUSY, tx_buffer))
-//        } else {
-//            if tx_len > tx_buffer.len() {
-//                return Err((ErrorCode::SIZE, tx_buffer));
-//            }
-//            let usart = &USARTRegManager::new(&self);
-//            // enable TX
-//            self.enable_tx(usart);
-//            self.usart_tx_state.set(USARTStateTX::DMA_Transmitting);
-//
-//            // set up dma transfer and start transmission
-//            if self.tx_dma.get().is_some() {
-//                self.tx_dma.get().map(move |dma| {
-//                    dma.enable();
-//                    self.tx_len.set(tx_len);
-//                    dma.do_transfer(self.tx_dma_peripheral, tx_buffer, tx_len);
-//                });
-//                Ok(())
-//            } else {
-//                Err((ErrorCode::OFF, tx_buffer))
-//            }
-//        }
-//    }
-//
-//    fn transmit_abort(&self) -> Result<(), ErrorCode> {
-//        if self.usart_tx_state.get() != USARTStateTX::Idle {
-//            let usart = &USARTRegManager::new(&self);
-//            self.abort_tx(usart, Err(ErrorCode::CANCEL));
-//            Err(ErrorCode::BUSY)
-//        } else {
-//            Ok(())
-//        }
-//    }
-//
-//    fn set_transmit_client(&self, client: &'a dyn uart::TransmitClient) {
-//        if let Some(UsartClient::Uart(Some(rx), _tx)) = self.client.take() {
-//            self.client.set(UsartClient::Uart(Some(rx), Some(client)));
-//        } else {
-//            self.client.set(UsartClient::Uart(None, Some(client)));
-//        }
-//    }
-//
-//    fn transmit_word(&self, _word: u32) -> Result<(), ErrorCode> {
-//        Err(ErrorCode::FAIL)
-//    }
-//}
-//
-//impl uart::Configure for USART<'_> {
-//    fn configure(&self, parameters: uart::Parameters) -> Result<(), ErrorCode> {
-//        if self.usart_mode.get() != UsartMode::Uart {
-//            return Err(ErrorCode::OFF);
-//        }
-//
-//        let usart = &USARTRegManager::new(&self);
-//
-//        // set USART mode register
-//        let mut mode = Mode::OVER::SET; // OVER: oversample at 8x
-//
-//        mode += Mode::CHRL::BITS8; // CHRL: 8-bit characters
-//        mode += Mode::USCLKS::CLK_USART; // USCLKS: select CLK_USART
-//
-//        mode += match parameters.stop_bits {
-//            uart::StopBits::One => Mode::NBSTOP::BITS_1_1,
-//            uart::StopBits::Two => Mode::NBSTOP::BITS_2_2,
-//        };
-//
-//        mode += match parameters.parity {
-//            uart::Parity::None => Mode::PAR::NONE, // no parity
-//            uart::Parity::Odd => Mode::PAR::ODD,   // odd parity
-//            uart::Parity::Even => Mode::PAR::EVEN, // even parity
-//        };
-//
-//        mode += match parameters.hw_flow_control {
-//            true => Mode::MODE::HARD_HAND,
-//            false => Mode::MODE::NORMAL,
-//        };
-//        usart.registers.mr.write(mode);
-//        // Set baud rate
-//        self.set_baud_rate(usart, parameters.baud_rate);
-//
-//        Ok(())
-//    }
-//}
-//
-//impl<'a> uart::ReceiveAdvanced<'a> for USART<'a> {
-//    fn receive_automatic(
-//        &self,
-//        rx_buffer: &'static mut [u8],
-//        len: usize,
-//        interbyte_timeout: u8,
-//    ) -> Result<(), (ErrorCode, &'static mut [u8])> {
-//        if self.usart_rx_state.get() != USARTStateRX::Idle {
-//            Err((ErrorCode::BUSY, rx_buffer))
-//        } else {
-//            let usart = &USARTRegManager::new(&self);
-//            let length = cmp::min(len, rx_buffer.len());
-//
-//            // enable RX
-//            self.enable_rx(usart);
-//            self.enable_rx_error_interrupts(usart);
-//            self.usart_rx_state.set(USARTStateRX::DMA_Receiving);
-//
-//            // enable receive timeout
-//            self.enable_rx_timeout(usart, interbyte_timeout);
-//
-//            // set up dma transfer and start reception
-//            self.rx_dma.get().map(move |dma| {
-//                dma.enable();
-//                dma.do_transfer(self.rx_dma_peripheral, rx_buffer, length);
-//                self.rx_len.set(length);
-//            });
-//            Ok(())
-//        }
-//    }
-//}
-
 /// SPI
 impl spi::SpiMaster for USART<'_> {
     type ChipSelect = Option<&'static dyn hil::gpio::Pin>;
@@ -1449,7 +1313,8 @@ impl spi::SpiMaster for USART<'_> {
                         dma.do_transfer(self.tx_dma_peripheral, write_buffer, count);
 
                         // Start the read transaction.
-                        self.usart_rx_state.set(USARTStateRX::DMA_Receiving);
+                        self.usart_rx_state
+                            .set(USARTStateRX::DMA_Receiving(TransferType::Buffer_Transfer));
                         read.enable();
                         read.do_transfer(self.rx_dma_peripheral, rbuf, count);
                     });

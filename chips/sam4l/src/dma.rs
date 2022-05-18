@@ -254,6 +254,10 @@ impl DMAChannel {
         });
     }
 
+    pub fn set_width(&self, width: DMAWidth) {
+        self.width.set(width);
+    }
+
     pub fn start_transfer(&self) {
         self.registers.cr.write(Control::TEN::SET);
     }

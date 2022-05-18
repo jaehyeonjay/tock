@@ -26,6 +26,11 @@ impl<I: InterruptService<Task> + 'static> Sam4l<I> {
     }
 }
 
+static mut USART_CHAR_BUF0: [u8; 2] = [0; 2];
+static mut USART_CHAR_BUF1: [u8; 2] = [0; 2];
+static mut USART_CHAR_BUF2: [u8; 2] = [0; 2];
+static mut USART_CHAR_BUF3: [u8; 2] = [0; 2];
+
 /// This struct, when initialized, instantiates all peripheral drivers for the apollo3.
 /// If a board wishes to use only a subset of these peripherals, this
 /// should not be used or imported, and a modified version should be
@@ -114,21 +119,25 @@ impl Sam4lDefaultPeripherals {
     // TODO: Delete explanation
     pub fn setup_dma(&'static self) {
         use crate::dma;
+        self.usart0.set_char_buffer(unsafe { &mut USART_CHAR_BUF0 });
         self.usart0
             .set_dma(&self.dma_channels[0], &self.dma_channels[1]);
         self.dma_channels[0].initialize(&self.usart0, dma::DMAWidth::Width8Bit);
         self.dma_channels[1].initialize(&self.usart0, dma::DMAWidth::Width8Bit);
 
+        self.usart1.set_char_buffer(unsafe { &mut USART_CHAR_BUF1 });
         self.usart1
             .set_dma(&self.dma_channels[2], &self.dma_channels[3]);
         self.dma_channels[2].initialize(&self.usart1, dma::DMAWidth::Width8Bit);
         self.dma_channels[3].initialize(&self.usart1, dma::DMAWidth::Width8Bit);
 
+        self.usart2.set_char_buffer(unsafe { &mut USART_CHAR_BUF2 });
         self.usart2
             .set_dma(&self.dma_channels[4], &self.dma_channels[5]);
         self.dma_channels[4].initialize(&self.usart2, dma::DMAWidth::Width8Bit);
         self.dma_channels[5].initialize(&self.usart2, dma::DMAWidth::Width8Bit);
 
+        self.usart3.set_char_buffer(unsafe { &mut USART_CHAR_BUF3 });
         self.usart3
             .set_dma(&self.dma_channels[6], &self.dma_channels[7]);
         self.dma_channels[6].initialize(&self.usart3, dma::DMAWidth::Width8Bit);
