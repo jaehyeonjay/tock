@@ -10,7 +10,9 @@ use kernel::hil::spi;
 use kernel::hil::uart;
 use kernel::utilities::cells::{OptionalCell, TakeCell};
 use kernel::utilities::registers::interfaces::{ReadWriteable, Readable, Writeable};
-use kernel::utilities::registers::{register_bitfields, ReadOnly, ReadWrite, WriteOnly};
+use kernel::utilities::registers::{
+    register_bitfields, FieldValue, ReadOnly, ReadWrite, WriteOnly,
+};
 use kernel::utilities::StaticRef;
 use kernel::ErrorCode;
 
@@ -760,10 +762,7 @@ impl<'a> USART<'a> {
         }
 
         let usart = &USARTRegManager::new(&self);
-        let mut mode = match hw_flow_control {
-            Some(true) => Mode::MODE::HARD_HAND,
-            _ => Mode::MODE::NORMAL,
-        };
+        let mut mode = <FieldValue<u32, Mode::Register>>::new(0, 0, 0);
 
         if let Some(width) = width {
             mode += Mode::MODE9::CLEAR;
@@ -791,6 +790,13 @@ impl<'a> USART<'a> {
             };
         }
 
+        if let Some(hw_flow_control) = hw_flow_control {
+            mode += match hw_flow_control {
+                true => Mode::MODE::HARD_HAND,
+                false => Mode::MODE::NORMAL,
+            }
+        }
+
         let actual_baud = match baud_rate {
             None => None,
             Some(0) => return Err(ErrorCode::INVAL),
@@ -804,21 +810,26 @@ impl<'a> USART<'a> {
                 let cd = div / 8;
                 let fp = div % 8;
 
+                if cd == 0 || cd > u16::MAX.into() {
+                    // maximum baud rate exceeded (avoid div by 0 in calculate baud rate)
+                    return Err(ErrorCode::INVAL);
+                }
+
                 let real_baud = Self::calculate_uart_baud(
                     Mode::OVER.read(mode.into()),
                     system_frequency,
                     cd,
                     fp,
                 );
+                // use u32::abs_diff in rust 1.60.0
                 let diff = if baud_rate > real_baud {
                     baud_rate - real_baud
                 } else {
                     real_baud - baud_rate
                 };
                 let error = (100 * diff) / baud_rate;
-                if error >= 5 || cd == 0 || cd > u16::MAX.into() {
+                if error >= 5 {
                     // sam4l datasheet p588 recommends against >5% error rate
-                    // if cd == 0, then we exceeded the maximum baud rate, cd only gets 16 bits
                     return Err(ErrorCode::INVAL);
                 }
                 // do this last so either both registers (MR + BRGR) are updated or neither
