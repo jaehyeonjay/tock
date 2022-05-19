@@ -260,6 +260,14 @@ pub unsafe fn main() {
     //    ConsoleComponent::new(board_kernel, capsules::console::DRIVER_NUM, uart_mux).finalize(());
     //DebugWriterComponent::new(uart_mux).finalize(());
 
+    use kernel::hil;
+    // hil::uart::Transmit::set_transmit_client(&peripherals.usart3, console);
+    // NOTE: no receive client set
+    let echo = static_init!(Echo<'static>, Echo::new(&peripherals.usart3));
+    hil::uart::Receive::set_receive_client(&peripherals.usart3, echo);
+    hil::uart::Receive::receive_buffer(&peripherals.usart3, &mut ECHO_BUFFER, 4)
+        .expect("Failed to receive buffer");
+
     // # TIMER
     let mux_alarm = AlarmMuxComponent::new(&peripherals.ast)
         .finalize(components::alarm_mux_component_helper!(sam4l::ast::Ast));
@@ -292,8 +300,8 @@ pub unsafe fn main() {
     // -pal, 11/20/18
     //
     //test::virtual_uart_rx_test::run_virtual_uart_receive(uart_mux);
-    debug!("Initialization complete. Entering main loop");
-    debug!("A second line");
+    debug!("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    debug!("done");
 
     /// These symbols are defined in the linker script.
     extern "C" {
@@ -328,4 +336,57 @@ pub unsafe fn main() {
     });
 
     board_kernel.kernel_loop::<_, _, NUM_PROCS, 0>(&imix, chip, None, &main_cap);
+}
+
+static mut ECHO_BUFFER: [u8; 64] = [0; 64];
+
+struct Echo<'a> {
+    uart: &'a dyn kernel::hil::uart::UartData<'a>,
+}
+
+impl<'a> Echo<'a> {
+    pub fn new(uart: &'a dyn kernel::hil::uart::UartData<'a>) -> Self {
+        Self { uart }
+    }
+}
+
+impl<'a> kernel::hil::uart::ReceiveClient for Echo<'a> {
+    fn received_buffer(
+        &self,
+        rx_buffer: &'static mut [u8],
+        rx_len: usize,
+        rval: Result<(), kernel::ErrorCode>,
+        _error: kernel::hil::uart::Error,
+    ) {
+        debug!(
+            "Received {:?}",
+            core::str::from_utf8(&rx_buffer[..rx_len]).unwrap_or("<INVALID STR>")
+        );
+        self.uart
+            .receive_character()
+            .expect("Failed to receive character");
+        if let Err(e) = rval {
+            debug!("Error: {:?}", e);
+        }
+        // } else {
+        //     self.uart.receive_abort();
+        // }
+    }
+
+    fn received_character(
+        &self,
+        character: u32,
+        rval: Result<(), kernel::ErrorCode>,
+        _error: kernel::hil::uart::Error,
+    ) {
+        debug!("Received char: {:?}", character);
+        self.uart
+            .receive_character()
+            .expect("Failed to receive character");
+        if let Err(e) = rval {
+            debug!("Error: {:?}", e);
+        } else {
+            self.uart.receive_abort();
+        }
+    }
 }
