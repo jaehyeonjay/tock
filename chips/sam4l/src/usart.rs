@@ -357,7 +357,7 @@ pub enum TransferType {
 #[allow(non_camel_case_types)]
 pub enum USARTStateRX {
     Idle,
-    DMA_Receiving(TransferType),
+    DMA_Receiving(TransferType), // are we transmitting a single character or a buffer
     Aborted(TransferType, usize, Result<(), ErrorCode>, uart::Error), // previous type, amount that was left, rval, error
 }
 
@@ -728,14 +728,7 @@ impl<'a> USART<'a> {
         // The clock divisor is calculated differently in UART and SPI modes.
         match self.usart_mode.get() {
             UsartMode::Uart => {
-                let uart_baud_rate = 8 * baud_rate;
-                let cd = system_frequency / uart_baud_rate;
-                //Generate fractional part
-                let fp = (system_frequency + baud_rate / 2) / baud_rate - 8 * cd;
-                usart
-                    .registers
-                    .brgr
-                    .write(BaudRate::FP.val(fp) + BaudRate::CD.val(cd));
+                let _ = self.configure_uart(Some(baud_rate), None, None, None, None);
             }
             UsartMode::Spi => {
                 let cd = system_frequency / baud_rate;
@@ -745,10 +738,12 @@ impl<'a> USART<'a> {
         };
     }
 
+    // calculates the actual uart baud rate from various register values
     fn calculate_uart_baud(over_bit: u32, clock_freq: u32, cd: u32, fp: u32) -> u32 {
         clock_freq / (8 * (2 - over_bit) * cd + fp) // from sam4l datasheet page 587
     }
 
+    // configure various uart settings. if any input is None, that setting should remain unchanged
     fn configure_uart(
         &self,
         baud_rate: Option<u32>,
@@ -762,6 +757,7 @@ impl<'a> USART<'a> {
         }
 
         let usart = &USARTRegManager::new(&self);
+        // begin with an empty value that will not change the register
         let mut mode = <FieldValue<u32, Mode::Register>>::new(0, 0, 0);
 
         if let Some(width) = width {
@@ -797,7 +793,7 @@ impl<'a> USART<'a> {
             }
         }
 
-        let actual_baud = match baud_rate {
+        let real_baud = match baud_rate {
             None => None,
             Some(0) => return Err(ErrorCode::INVAL),
             Some(baud_rate) => {
@@ -821,7 +817,7 @@ impl<'a> USART<'a> {
                     cd,
                     fp,
                 );
-                // use u32::abs_diff in rust 1.60.0
+                // use u32::abs_diff in rust >= 1.60.0
                 let diff = if baud_rate > real_baud {
                     baud_rate - real_baud
                 } else {
@@ -842,7 +838,7 @@ impl<'a> USART<'a> {
         };
 
         usart.registers.mr.modify(mode);
-        Ok(actual_baud)
+        Ok(real_baud)
     }
 
     /// In non-SPI mode, this drives RTS low.
