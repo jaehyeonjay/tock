@@ -454,17 +454,6 @@ impl<'a> Uarte<'a> {
 
         self.enable_tx_interrupts();
     }
-
-    fn setup_character_transmit(&self, character: u32) {
-        const TX_LEN: usize = core::mem::size_of::<u32>();
-        static mut BUF: &'static mut [u8] = &mut [0; 4];
-        unsafe {
-            for index in 0..4 {
-                BUF[index] = (character & (0xFF << (index * 8))) as u8;
-            }
-            self.setup_buffer_transmit(BUF, TX_LEN);
-        }
-    }
 }
 
 impl<'a> hil::uart::Transmit<'a> for Uarte<'a> {
@@ -490,14 +479,7 @@ impl<'a> hil::uart::Transmit<'a> for Uarte<'a> {
     }
 
     fn transmit_character(&self, character: u32) -> Result<(), ErrorCode> {
-        if !self.registers.enable.is_set(Uart::ENABLE) {
-            Err(ErrorCode::OFF)
-        } else if self.tx_buffer.is_some() {
-            Err(ErrorCode::BUSY)
-        } else {
-            self.setup_character_transmit(character);
-            Ok(())
-        }
+        Err(ErrorCode::NOSUPPORT)
     }
 
     fn transmit_abort(&self) -> hil::uart::AbortResult {
@@ -523,7 +505,6 @@ impl<'a> hil::uart::Transmit<'a> for Uarte<'a> {
 
 impl<'a> hil::uart::Receive<'a> for Uarte<'a> {
     fn set_receive_client(&self, client: &'a dyn hil::uart::ReceiveClient) {
-        // unimplemented!()
         self.rx_client.set(client);
     }
 
@@ -532,7 +513,6 @@ impl<'a> hil::uart::Receive<'a> for Uarte<'a> {
         rx_buffer: &'static mut [u8],
         rx_len: usize,
     ) -> Result<(), (ErrorCode, &'static mut [u8])> {
-        // unimplemented!()
         if self.rx_buffer.is_some() {
             return Err((ErrorCode::BUSY, rx_buffer));
         }
@@ -557,12 +537,10 @@ impl<'a> hil::uart::Receive<'a> for Uarte<'a> {
     }
 
     fn receive_character(&self) -> Result<(), ErrorCode> {
-        // unimplemented!()
-        Err(ErrorCode::FAIL)
+        Err(ErrorCode::NOSUPPORT)
     }
 
     fn receive_abort(&self) -> hil::uart::AbortResult {
-        // unimplemented!()
         if self.rx_buffer.is_none() {
             hil::uart::AbortResult::NoCallback
         } else {

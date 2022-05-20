@@ -13,7 +13,7 @@ use kernel::component::Component;
 use kernel::dynamic_deferred_call::{DynamicDeferredCall, DynamicDeferredCallClientState};
 use kernel::hil::led::LedLow;
 use kernel::hil::time::Counter;
-use kernel::hil::uart::Transmit;
+use kernel::hil::uart::{Receive, Transmit};
 use kernel::platform::{KernelResources, SyscallDriverLookup};
 use kernel::scheduler::round_robin::RoundRobinSched;
 #[allow(unused_imports)]
@@ -246,7 +246,15 @@ pub unsafe fn main() {
     static mut ECHO_BUFFER: [u8; 64] = [0; 64];
     let echo = static_init!(Echo<'static>, Echo::new(&base_peripherals.uarte0));
     hil::uart::Receive::set_receive_client(&base_peripherals.uarte0, echo);
-    hil::uart::Receive::receive_buffer(&base_peripherals.uarte0, &mut ECHO_BUFFER, 4);
+
+    //basic receive
+    // hil::uart::Receive::receive_buffer(&base_peripherals.uarte0, &mut ECHO_BUFFER, 4);
+
+    //test receive  abort
+    hil::uart::Receive::receive_buffer(&base_peripherals.uarte0, &mut ECHO_BUFFER, 8);
+
+    //cancel the receive now
+    base_peripherals.uarte0.receive_abort();
 
     debug!("{}", &nrf52840::ficr::FICR_INSTANCE);
     let result = base_peripherals.uarte0.transmit_abort();
@@ -324,8 +332,5 @@ impl<'a> kernel::hil::uart::ReceiveClient for Echo<'a> {
         if let Err(e) = rval {
             debug!("Error: {:?}", e);
         }
-        // } else {
-        //     self.uart.receive_abort();
-        // }
     }
 }
