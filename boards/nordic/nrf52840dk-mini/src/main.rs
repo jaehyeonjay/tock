@@ -13,6 +13,7 @@ use kernel::component::Component;
 use kernel::dynamic_deferred_call::{DynamicDeferredCall, DynamicDeferredCallClientState};
 use kernel::hil::led::LedLow;
 use kernel::hil::time::Counter;
+use kernel::hil::uart::{Receive, Transmit};
 use kernel::platform::{KernelResources, SyscallDriverLookup};
 use kernel::scheduler::round_robin::RoundRobinSched;
 #[allow(unused_imports)]
@@ -235,8 +236,37 @@ pub unsafe fn main() {
         systick: cortexm4::systick::SysTick::new_with_calibration(64000000),
     };
 
+    // testing transmit -------------------------------
+    // debug!("Start test\r\n");
+    // base_peripherals.uarte0.transmit_abort();
     debug!("Initialization complete. Entering main loop\r");
+
+    // test receive ---------------------------------
+    use kernel::hil;
+    static mut ECHO_BUFFER: [u8; 64] = [0; 64];
+    let echo = static_init!(Echo<'static>, Echo::new(&base_peripherals.uarte0));
+    hil::uart::Receive::set_receive_client(&base_peripherals.uarte0, echo);
+
+    //basic receive
+    // hil::uart::Receive::receive_buffer(&base_peripherals.uarte0, &mut ECHO_BUFFER, 4);
+
+    //test receive  abort
+    hil::uart::Receive::receive_buffer(&base_peripherals.uarte0, &mut ECHO_BUFFER, 8);
+
+    //cancel the receive now
+    base_peripherals.uarte0.receive_abort();
+
     debug!("{}", &nrf52840::ficr::FICR_INSTANCE);
+    let result = base_peripherals.uarte0.transmit_abort();
+    match result {
+        uart::AbortResult::Callback(s) => match s {
+            true => debug!("result of abort was Callback(true)\r"),
+            false => debug!("result of abort was Callback(false)\r"),
+        },
+        uart::AbortResult::NoCallback => debug!("result of abort was NoCallback\r"),
+    }
+
+    debug!("end test\r\n");
 
     /// These symbols are defined in the linker script.
     extern "C" {
@@ -271,4 +301,36 @@ pub unsafe fn main() {
     });
 
     board_kernel.kernel_loop::<_, _, NUM_PROCS, 0>(&platform, chip, None, &main_loop_capability);
+}
+
+static mut ECHO_BUFFER: [u8; 64] = [0; 64];
+
+struct Echo<'a> {
+    uart: &'a dyn kernel::hil::uart::UartData<'a>,
+}
+
+impl<'a> Echo<'a> {
+    pub fn new(uart: &'a dyn kernel::hil::uart::UartData<'a>) -> Self {
+        Self { uart }
+    }
+}
+
+impl<'a> kernel::hil::uart::ReceiveClient for Echo<'a> {
+    fn received_buffer(
+        &self,
+        rx_buffer: &'static mut [u8],
+        rx_len: usize,
+        rval: Result<(), kernel::ErrorCode>,
+        error: kernel::hil::uart::Error,
+    ) {
+        use kernel::hil::uart::Receive;
+        debug!(
+            "Received {:?}",
+            core::str::from_utf8(&rx_buffer[..rx_len]).unwrap_or("<INVALID STR>")
+        );
+        // self.uart.receive_buffer(rx_buffer, len,);
+        if let Err(e) = rval {
+            debug!("Error: {:?}", e);
+        }
+    }
 }

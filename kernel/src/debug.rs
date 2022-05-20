@@ -321,6 +321,27 @@ pub fn debug_flush_queue_() {
     });
 }
 
+pub fn debug_abort_() {
+    let writer = unsafe { get_debug_writer() };
+    let abort_res = writer.dw.map(|dw| dw.uart.transmit_abort());
+    unsafe { DEBUG_QUEUE.as_deref_mut() }.map(|buffer| {
+        buffer.dw.map(|dw| {
+            dw.ring_buffer.map(|ring_buffer| {
+                ring_buffer.dequeue();
+            });
+        });
+    });
+}
+
+/// This macro prints a new line to an internal ring buffer, the contents of
+/// which are only flushed with `debug_flush_queue!` and in the panic handler.
+#[macro_export]
+macro_rules! debug_abort {
+    () => {{
+        $crate::debug::debug_abort_();
+    }};
+}
+
 /// This macro prints a new line to an internal ring buffer, the contents of
 /// which are only flushed with `debug_flush_queue!` and in the panic handler.
 #[macro_export]
