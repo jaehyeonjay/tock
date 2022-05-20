@@ -523,7 +523,8 @@ impl<'a> hil::uart::Transmit<'a> for Uarte<'a> {
 
 impl<'a> hil::uart::Receive<'a> for Uarte<'a> {
     fn set_receive_client(&self, client: &'a dyn hil::uart::ReceiveClient) {
-        unimplemented!()
+        // unimplemented!()
+        self.rx_client.set(client);
     }
 
     fn receive_buffer(
@@ -531,15 +532,45 @@ impl<'a> hil::uart::Receive<'a> for Uarte<'a> {
         rx_buffer: &'static mut [u8],
         rx_len: usize,
     ) -> Result<(), (ErrorCode, &'static mut [u8])> {
-        unimplemented!()
+        // unimplemented!()
+        if self.rx_buffer.is_some() {
+            return Err((ErrorCode::BUSY, rx_buffer));
+        }
+        // truncate rx_len if necessary
+        let truncated_length = core::cmp::min(rx_len, rx_buffer.len());
+
+        self.rx_remaining_bytes.set(truncated_length);
+        self.offset.set(0);
+        self.rx_buffer.replace(rx_buffer);
+        self.set_rx_dma_pointer_to_buffer();
+
+        let truncated_uart_max_length = core::cmp::min(truncated_length, 255);
+
+        self.registers
+            .rxd_maxcnt
+            .write(Counter::COUNTER.val(truncated_uart_max_length as u32));
+        self.registers.task_stoprx.write(Task::ENABLE::SET);
+        self.registers.task_startrx.write(Task::ENABLE::SET);
+
+        self.enable_rx_interrupts();
+        Ok(())
     }
 
     fn receive_character(&self) -> Result<(), ErrorCode> {
-        unimplemented!()
+        // unimplemented!()
+        Err(ErrorCode::FAIL)
     }
 
     fn receive_abort(&self) -> hil::uart::AbortResult {
-        unimplemented!()
+        // unimplemented!()
+        if self.rx_buffer.is_none() {
+            hil::uart::AbortResult::NoCallback
+        } else {
+            self.rx_abort_in_progress.set(true);
+            self.registers.task_stoprx.write(Task::ENABLE::SET);
+            // We will never come across rx_remaining_bytes == 0 && rx_buffer.is_some
+            hil::uart::AbortResult::Callback(true)
+        }
     }
 }
 impl<'a> hil::uart::Configure for Uarte<'a> {

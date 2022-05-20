@@ -235,10 +235,17 @@ pub unsafe fn main() {
         scheduler,
         systick: cortexm4::systick::SysTick::new_with_calibration(64000000),
     };
-    debug!("Start test\r\n");
-    for i in 0..100000000 {}
+
+    // testing transmit -------------------------------
+    // debug!("Start test\r\n");
+    // base_peripherals.uarte0.transmit_abort();
     debug!("Initialization complete. Entering main loop\r");
-    let result = base_peripherals.uarte0.transmit_abort();
+
+    // test receive ---------------------------------
+    static mut ECHO_BUFFER: [u8; 64] = [0; 64];
+    let echo = static_init!(Echo<'static>, Echo::new(&base_peripherals.uarte0));
+    hil::uart::Receive::set_receive_client(&base_peripherals.uarte0, echo);
+    hil::uart::Receive::receive_buffer(&base_peripherals.uarte0, &mut ECHO_BUFFER, 4);
 
     match result {
         uart::AbortResult::Callback(s) => match s {
@@ -311,4 +318,39 @@ pub unsafe fn main() {
     });
 
     board_kernel.kernel_loop::<_, _, NUM_PROCS, 0>(&platform, chip, None, &main_loop_capability);
+}
+
+static mut ECHO_BUFFER: [u8; 64] = [0; 64];
+
+struct Echo<'a> {
+    uart: &'a dyn kernel::hil::uart::UartData<'a>,
+}
+
+impl<'a> Echo<'a> {
+    pub fn new(uart: &'a dyn kernel::hil::uart::UartData<'a>) -> Self {
+        Self { uart }
+    }
+}
+
+impl<'a> kernel::hil::uart::ReceiveClient for Echo<'a> {
+    fn received_buffer(
+        &self,
+        rx_buffer: &'static mut [u8],
+        rx_len: usize,
+        rval: Result<(), kernel::ErrorCode>,
+        error: kernel::hil::uart::Error,
+    ) {
+        use kernel::hil::uart::Receive;
+        debug!(
+            "Received {:?}",
+            core::str::from_utf8(&rx_buffer[..rx_len]).unwrap_or("<INVALID STR>")
+        );
+        // self.uart.receive_buffer(rx_buffer, len,);
+        if let Err(e) = rval {
+            debug!("Error: {:?}", e);
+        }
+        // } else {
+        //     self.uart.receive_abort();
+        // }
+    }
 }
