@@ -580,7 +580,7 @@ impl<'a> USART<'a> {
             self.disable_tx(usart);
 
             let remaining = tx_dma.transfer_counter();
-            tx_dma.abort_transfer(); 
+            tx_dma.abort();
 
             if remaining == 0 {
                 uart::AbortResult::Callback(false)
@@ -655,7 +655,6 @@ impl<'a> USART<'a> {
             self.disable_tx_empty_interrupt(usart);
             self.disable_tx(usart);
             self.usart_tx_state.set(USARTStateTX::Idle);
-
 
             // Now that we know the TX transaction is finished we can get the
             // buffer back from DMA and pass it back to the client. If we don't
@@ -949,12 +948,13 @@ impl dma::DMAClient for USART<'_> {
                     // note that the DMA has finished but TX cannot yet be disabled yet because
                     // there may still be bytes left in the TX buffer.
                     let status = usart.registers.csr.extract();
-                    
+
                     // if all transmissions are done and the transmit shift register is empty
                     if status.is_set(ChannelStatus::TXEMPTY) {
                         self.usart_tx_state.set(USARTStateTX::Transfer_Completing);
                         self.enable_tx_empty_interrupt(usart);
-                    } else {  // otherwise, process the next transmit
+                    } else {
+                        // otherwise, process the next transmit
                         let old_state = self.usart_tx_state.replace(USARTStateTX::Idle);
 
                         let txbuffer = self.tx_dma.get().and_then(|tx_dma| {
@@ -966,27 +966,27 @@ impl dma::DMAClient for USART<'_> {
                         // alert client
                         self.client.map(|usartclient| {
                             if let UsartClient::Uart(_rx, Some(tx)) = usartclient {
-                                    if let Some(buf) = txbuffer {
-                                        let length = self.tx_len.get();
-                                        let (tx_len, rval, error) = match old_state {
-                                            USARTStateTX::Aborted(unsent, rval, error) => {
-                                                (length - unsent, rval, error)
-                                            }
-                                            USARTStateTX::DMA_Transmitting => {
-                                                (length, Ok(()), uart::Error::None)
-                                            }
-                                            USARTStateTX::Transfer_Completing => {
-                                                (length, Ok(()), uart::Error::None)
-                                            },
-                                            USARTStateTX::Idle => unreachable!(),
-                                        };
-                                        tx.transmitted_buffer(buf, tx_len, rval);
-                                    }
+                                if let Some(buf) = txbuffer {
+                                    let length = self.tx_len.get();
+                                    let (tx_len, rval, error) = match old_state {
+                                        USARTStateTX::Aborted(unsent, rval, error) => {
+                                            (length - unsent, rval, error)
+                                        }
+                                        USARTStateTX::DMA_Transmitting => {
+                                            (length, Ok(()), uart::Error::None)
+                                        }
+                                        USARTStateTX::Transfer_Completing => {
+                                            (length, Ok(()), uart::Error::None)
+                                        }
+                                        USARTStateTX::Idle => unreachable!(),
+                                    };
+                                    tx.transmitted_buffer(buf, tx_len, rval);
                                 }
-                            });
-                        }
+                            }
+                        });
                     }
                 }
+            }
 
             UsartMode::Spi => {
                 if (self.usart_rx_state.get() == USARTStateRX::Idle
@@ -1068,17 +1068,12 @@ impl<'a> hil::uart::Transmit<'a> for USART<'a> {
             let to_send = to_ignore & character;
 
             // put character in register, than change states
-            usart.registers
-                .thr
-                .write(TransmitHold::TXCHR.val(to_send));
-            
+            usart.registers.thr.write(TransmitHold::TXCHR.val(to_send));
+
             self.usart_tx_state.set(USARTStateTX::Transfer_Completing);
 
             // interrupt
-            usart
-                .registers
-                .ier
-                .write(Interrupt::TXRDY::SET);
+            usart.registers.ier.write(Interrupt::TXRDY::SET);
 
             Ok(())
         }
