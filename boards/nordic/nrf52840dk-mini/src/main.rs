@@ -55,7 +55,6 @@ pub static mut STACK_MEMORY: [u8; 0x2000] = [0; 0x2000];
 
 /// Supported drivers by the platform
 pub struct Platform {
-    console: &'static capsules::console::Console<'static>,
     led: &'static capsules::led::LedDriver<
         'static,
         kernel::hil::led::LedLow<'static, nrf52840::gpio::GPIOPin<'static>>,
@@ -74,7 +73,6 @@ impl SyscallDriverLookup for Platform {
         F: FnOnce(Option<&dyn kernel::syscall::SyscallDriver>) -> R,
     {
         match driver_num {
-            capsules::console::DRIVER_NUM => f(Some(self.console)),
             capsules::alarm::DRIVER_NUM => f(Some(self.alarm)),
             capsules::led::DRIVER_NUM => f(Some(self.led)),
             _ => f(None),
@@ -224,19 +222,6 @@ pub unsafe fn main() {
         hw_flow_control: false,
     });
     components::debug_writer::DebugWriterNoMuxComponent::new(&base_peripherals.uarte0).finalize(());
-    let grant_cap = create_capability!(capabilities::MemoryAllocationCapability);
-    let console = static_init!(
-        capsules::console::Console<'static>,
-        capsules::console::Console::new(
-            &base_peripherals.uarte0,
-            &mut capsules::console::WRITE_BUF,
-            &mut capsules::console::READ_BUF,
-            board_kernel.create_grant(capsules::console::DRIVER_NUM, &grant_cap)
-        )
-    );
-    use kernel::hil;
-    hil::uart::Transmit::set_transmit_client(&base_peripherals.uarte0, console);
-    // NOTE: no receive client set
 
     nrf52_components::NrfClockComponent::new(&base_peripherals.clock).finalize(());
 
@@ -244,7 +229,6 @@ pub unsafe fn main() {
         .finalize(components::rr_component_helper!(NUM_PROCS));
 
     let platform = Platform {
-        console,
         led,
         alarm,
         scheduler,

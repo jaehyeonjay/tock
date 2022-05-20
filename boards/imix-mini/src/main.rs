@@ -53,7 +53,6 @@ static mut CHIP: Option<&'static sam4l::chip::Sam4l<Sam4lDefaultPeripherals>> = 
 pub static mut STACK_MEMORY: [u8; 0x2000] = [0; 0x2000];
 
 struct Imix {
-    console: &'static capsules::console::Console<'static>,
     alarm: &'static AlarmDriver<'static, VirtualMuxAlarm<'static, sam4l::ast::Ast<'static>>>,
     led:
         &'static capsules::led::LedDriver<'static, LedHigh<'static, sam4l::gpio::GPIOPin<'static>>>,
@@ -67,7 +66,6 @@ impl SyscallDriverLookup for Imix {
         F: FnOnce(Option<&dyn kernel::syscall::SyscallDriver>) -> R,
     {
         match driver_num {
-            capsules::console::DRIVER_NUM => f(Some(self.console)),
             capsules::alarm::DRIVER_NUM => f(Some(self.alarm)),
             capsules::led::DRIVER_NUM => f(Some(self.led)),
             _ => f(None),
@@ -262,22 +260,13 @@ pub unsafe fn main() {
     //    ConsoleComponent::new(board_kernel, capsules::console::DRIVER_NUM, uart_mux).finalize(());
     //DebugWriterComponent::new(uart_mux).finalize(());
 
-    let grant_cap = create_capability!(capabilities::MemoryAllocationCapability);
-    let console = static_init!(
-        capsules::console::Console<'static>,
-        capsules::console::Console::new(
-            &peripherals.usart3,
-            &mut capsules::console::WRITE_BUF,
-            &mut capsules::console::READ_BUF,
-            board_kernel.create_grant(capsules::console::DRIVER_NUM, &grant_cap)
-        )
-    );
     use kernel::hil;
     // hil::uart::Transmit::set_transmit_client(&peripherals.usart3, console);
     // NOTE: no receive client set
     let echo = static_init!(Echo<'static>, Echo::new(&peripherals.usart3));
     hil::uart::Receive::set_receive_client(&peripherals.usart3, echo);
-    hil::uart::Receive::receive_buffer(&peripherals.usart3, &mut ECHO_BUFFER, 4);
+    hil::uart::Receive::receive_buffer(&peripherals.usart3, &mut ECHO_BUFFER, 4)
+        .expect("Failed to receive buffer");
 
     // # TIMER
     let mux_alarm = AlarmMuxComponent::new(&peripherals.ast)
@@ -298,7 +287,6 @@ pub unsafe fn main() {
         .finalize(components::rr_component_helper!(NUM_PROCS));
 
     let imix = Imix {
-        console,
         alarm,
         led,
         scheduler,
@@ -322,7 +310,6 @@ pub unsafe fn main() {
     //use kernel::hil::uart::Transmit;
     //let character = 0xffff41;
     //peripherals.usart3.set_width(hil::uart::Width::Eight);
-    //peripherals.usart3.transmit_character(character);
     //peripherals.usart3.transmit_character(character);
 
     /// These symbols are defined in the linker script.
@@ -378,11 +365,33 @@ impl<'a> kernel::hil::uart::ReceiveClient for Echo<'a> {
         rx_buffer: &'static mut [u8],
         rx_len: usize,
         rval: Result<(), kernel::ErrorCode>,
-        error: kernel::hil::uart::Error,
+        _error: kernel::hil::uart::Error,
     ) {
-        use kernel::hil::uart::Receive;
-        debug!("Received {:?}", &rx_buffer[..rx_len]);
-        self.uart.receive_buffer(rx_buffer, 4);
+        debug!(
+            "Received {:?}",
+            core::str::from_utf8(&rx_buffer[..rx_len]).unwrap_or("<INVALID STR>")
+        );
+        self.uart
+            .receive_character()
+            .expect("Failed to receive character");
+        if let Err(e) = rval {
+            debug!("Error: {:?}", e);
+        }
+        // } else {
+        //     self.uart.receive_abort();
+        // }
+    }
+
+    fn received_character(
+        &self,
+        character: u32,
+        rval: Result<(), kernel::ErrorCode>,
+        _error: kernel::hil::uart::Error,
+    ) {
+        debug!("Received char: {:?}", character);
+        self.uart
+            .receive_character()
+            .expect("Failed to receive character");
         if let Err(e) = rval {
             debug!("Error: {:?}", e);
         } else {
