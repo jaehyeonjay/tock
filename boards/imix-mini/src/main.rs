@@ -311,15 +311,19 @@ pub unsafe fn main() {
     // Once everything is virtualized in the kernel this won't be a problem.
     // -pal, 11/20/18
     //
+    /******** Test for transmit_buffer ********/
     //test::virtual_uart_rx_test::run_virtual_uart_receive(uart_mux);
-    //debug!("hello");
+    //debug!("first");
     //debug!("second");
     //debug!("third");
-    use kernel::hil::uart::Transmit;
-    let character = 0xffff41;
-    peripherals.usart3.set_width(hil::uart::Width::Eight);
-    peripherals.usart3.transmit_character(character);
-    peripherals.usart3.transmit_character(character);
+    //debug!("final!");
+
+    /******** Test for transmit_character ********/
+    //use kernel::hil::uart::Transmit;
+    //let character = 0xffff41;
+    //peripherals.usart3.set_width(hil::uart::Width::Eight);
+    //peripherals.usart3.transmit_character(character);
+    //peripherals.usart3.transmit_character(character);
 
     /// These symbols are defined in the linker script.
     extern "C" {

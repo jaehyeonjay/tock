@@ -859,7 +859,6 @@ impl<'a> USART<'a> {
         usart.registers.idr.write(Interrupt::TIMEOUT::SET);
     }
 
-    // for use by panic in io.rs QUESTION: can i repurpose this function
     pub fn send_byte(&self, usart: &USARTRegManager, byte: u8) {
         usart
             .registers
@@ -917,17 +916,13 @@ impl dma::DMAClient for USART<'_> {
 
                     // note that the DMA has finished but TX cannot yet be disabled yet because
                     // there may still be bytes left in the TX buffer.
-                    
-                    // TODO:
-                    // todo: if you are done done do this:
-                    // note: we had a new abort state but here it changes back to
-                    // transfer completing
                     let status = usart.registers.csr.extract();
-
+                    
+                    // if all transmissions are done and the transmit shift register is empty
                     if status.is_set(ChannelStatus::TXEMPTY) {
                         self.usart_tx_state.set(USARTStateTX::Transfer_Completing);
                         self.enable_tx_empty_interrupt(usart);
-                    } else {
+                    } else {  // otherwise, process the next transmit
                         let old_state = self.usart_tx_state.replace(USARTStateTX::Idle);
 
                         let txbuffer = self.tx_dma.get().and_then(|tx_dma| {
@@ -1039,8 +1034,8 @@ impl<'a> hil::uart::Transmit<'a> for USART<'a> {
             self.usart_tx_state.set(USARTStateTX::DMA_Transmitting);
 
             // ignore bits to fit character width
-            let bits_to_ignore = 4294967295 ^ (4294967295 << self.get_width() as u32);
-            let to_send = bits_to_ignore & character;
+            let to_ignore = 0xffffffff ^ (0xffffffff << self.get_width() as u32);
+            let to_send = to_ignore & character;
 
             // put character in register, than change states
             usart.registers
@@ -1048,6 +1043,13 @@ impl<'a> hil::uart::Transmit<'a> for USART<'a> {
                 .write(TransmitHold::TXCHR.val(to_send));
             
             self.usart_tx_state.set(USARTStateTX::Transfer_Completing);
+
+            // interrupt
+            usart
+                .registers
+                .ier
+                .write(Interrupt::TXRDY::SET);
+
             Ok(())
         }
     }
