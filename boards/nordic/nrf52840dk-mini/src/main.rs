@@ -242,36 +242,11 @@ pub unsafe fn main() {
     debug!("Initialization complete. Entering main loop\r");
 
     // test receive ---------------------------------
+    use kernel::hil;
     static mut ECHO_BUFFER: [u8; 64] = [0; 64];
     let echo = static_init!(Echo<'static>, Echo::new(&base_peripherals.uarte0));
     hil::uart::Receive::set_receive_client(&base_peripherals.uarte0, echo);
     hil::uart::Receive::receive_buffer(&base_peripherals.uarte0, &mut ECHO_BUFFER, 4);
-
-    match result {
-        uart::AbortResult::Callback(s) => match s {
-            true => debug!("result of abort was Callback(true)\r"),
-            false => debug!("result of abort was Callback(false)\r"),
-        },
-        uart::AbortResult::NoCallback => debug!("result of abort was NoCallback\r"),
-    }
-    let result = base_peripherals.uarte0.transmit_abort();
-
-    match result {
-        uart::AbortResult::Callback(s) => match s {
-            true => debug!("result of abort was Callback(true)\r"),
-            false => debug!("result of abort was Callback(false)\r"),
-        },
-        uart::AbortResult::NoCallback => debug!("result of abort was NoCallback\r"),
-    }
-    debug!("hhvQppPyveGrN3mFP6dfr9dUetMgvhCA1GQQKFZDbENueIeftf7exEIJWxBdsL2AQN2L1KZpXWjSg7398WgKqXu5OlgYIzs0fW2zHgxAXE8WmUtIwnYnLDswgTSke1pKcl3y7Q8rTqJv8PgK20q2bzbMTD3Dk2M6sQtNdGNsiOJPpEg24U3rtXFWer1R18baw8ojestVIFfYg9cSjLJS0VQXGnxKOUvW62EHl2ME1uenpZnHKDM3smQkXWSpwRBhO\r");
-    let result = base_peripherals.uarte0.transmit_abort();
-    match result {
-        uart::AbortResult::Callback(s) => match s {
-            true => debug!("result of abort was Callback(true)\r"),
-            false => debug!("result of abort was Callback(false)\r"),
-        },
-        uart::AbortResult::NoCallback => debug!("result of abort was NoCallback\r"),
-    }
 
     debug!("{}", &nrf52840::ficr::FICR_INSTANCE);
     let result = base_peripherals.uarte0.transmit_abort();

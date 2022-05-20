@@ -575,6 +575,9 @@ impl<'a> hil::uart::Receive<'a> for Uarte<'a> {
 }
 impl<'a> hil::uart::Configure for Uarte<'a> {
     fn set_baud_rate(&self, rate: u32) -> Result<u32, ErrorCode> {
+        if rate == 0 {
+            return Err(ErrorCode::INVAL);
+        }
         self.set_baud_rate(rate)
     }
     fn set_width(&self, width: hil::uart::Width) -> Result<(), ErrorCode> {
