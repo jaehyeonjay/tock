@@ -578,16 +578,16 @@ impl<'a> hil::uart::Configure for Uarte<'a> {
         self.set_baud_rate(rate)
     }
     fn set_width(&self, width: hil::uart::Width) -> Result<(), ErrorCode> {
-        unimplemented!()
+        Err(ErrorCode::NOSUPPORT)
     }
     fn set_parity(&self, parity: hil::uart::Parity) -> Result<(), ErrorCode> {
-        unimplemented!()
+        Err(ErrorCode::NOSUPPORT)
     }
     fn set_stop_bits(&self, stop: hil::uart::StopBits) -> Result<(), ErrorCode> {
-        unimplemented!()
+        Err(ErrorCode::NOSUPPORT)
     }
     fn set_flow_control(&self, on: bool) -> Result<(), ErrorCode> {
-        unimplemented!()
+        Err(ErrorCode::NOSUPPORT)
     }
 
     fn configure(&self, params: hil::uart::Parameters) -> Result<(), ErrorCode> {
@@ -611,22 +611,32 @@ impl<'a> hil::uart::Configure for Uarte<'a> {
 
 impl<'a> hil::uart::Configuration for Uarte<'a> {
     fn get_baud_rate(&self) -> u32 {
-        unimplemented!()
+        self.registers.baudrate.get()
     }
     fn get_width(&self) -> hil::uart::Width {
-        unimplemented!()
+        // only support 8 width i think
+        hil::uart::Width::Eight
     }
     fn get_parity(&self) -> hil::uart::Parity {
-        unimplemented!()
+        // configure ensures we always have parity set to None
+        hil::uart::Parity::None
     }
     fn get_stop_bits(&self) -> hil::uart::StopBits {
-        unimplemented!()
+        // configure trait guarantees StopBits is One
+        hil::uart::StopBits::One
     }
     fn get_flow_control(&self) -> bool {
-        unimplemented!()
+        // can never set hw flow control to true in our configure trait impl
+        false
     }
     fn get_configuration(&self) -> hil::uart::Parameters {
-        unimplemented!()
+        hil::uart::Parameters {
+            baud_rate: self.get_baud_rate(),
+            width: self.get_width(),
+            parity: self.get_parity(),
+            stop_bits: self.get_stop_bits(),
+            hw_flow_control: self.get_flow_control(),
+        }
     }
 }
 
