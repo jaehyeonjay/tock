@@ -658,9 +658,25 @@ impl<'a, U: hil::usb::UsbController<'a>, A: 'a + Alarm<'a>> hil::usb::Client<'a>
 }
 
 impl<'a, U: hil::usb::UsbController<'a>, A: 'a + Alarm<'a>> uart::Configure for CdcAcm<'a, U, A> {
+    // Since this is not a real UART, we don't need to consider these
+    // parameters.
+
+    fn set_baud_rate(&self, rate: u32) -> Result<u32, ErrorCode> {
+        unreachable!()
+    }
+    fn set_width(&self, width: hil::uart::Width) -> Result<(), ErrorCode> {
+        unreachable!()
+    }
+    fn set_parity(&self, parity: hil::uart::Parity) -> Result<(), ErrorCode> {
+        unreachable!()
+    }
+    fn set_stop_bits(&self, stop: hil::uart::StopBits) -> Result<(), ErrorCode> {
+        unreachable!()
+    }
+    fn set_flow_control(&self, on: bool) -> Result<(), ErrorCode> {
+        unreachable!()
+    }
     fn configure(&self, _parameters: uart::Parameters) -> Result<(), ErrorCode> {
-        // Since this is not a real UART, we don't need to consider these
-        // parameters.
         Ok(())
     }
 }
@@ -711,10 +727,11 @@ impl<'a, U: hil::usb::UsbController<'a>, A: 'a + Alarm<'a>> uart::Transmit<'a>
     }
 
     fn transmit_abort(&self) -> uart::AbortResult {
-        uart::AbortResult::Callback(false);
+        // TODO: is this ok?
+        uart::AbortResult::Callback(false)
     }
 
-    fn transmit_character(&self, _word: u32) -> Result<(), ErrorCode> {
+    fn transmit_character(&self, character: u32) -> Result<(), ErrorCode> {
         Err(ErrorCode::FAIL)
     }
 }
@@ -751,7 +768,7 @@ impl<'a, U: hil::usb::UsbController<'a>, A: 'a + Alarm<'a>> uart::Receive<'a> fo
             // call to set the callback and return `BUSY`.
             self.deferred_call_pending_abortrx.set(true);
             self.handle.map(|handle| self.deferred_caller.set(*handle));
-            uart::AbortResult::Callback(true);
+            uart::AbortResult::Callback(true)
         }
     }
 
