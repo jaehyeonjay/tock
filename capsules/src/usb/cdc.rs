@@ -710,11 +710,11 @@ impl<'a, U: hil::usb::UsbController<'a>, A: 'a + Alarm<'a>> uart::Transmit<'a>
         }
     }
 
-    fn transmit_abort(&self) -> Result<(), ErrorCode> {
-        Err(ErrorCode::FAIL)
+    fn transmit_abort(&self) -> uart::AbortResult {
+        uart::AbortResult::Callback(false);
     }
 
-    fn transmit_word(&self, _word: u32) -> Result<(), ErrorCode> {
+    fn transmit_character(&self, _word: u32) -> Result<(), ErrorCode> {
         Err(ErrorCode::FAIL)
     }
 }
@@ -742,20 +742,20 @@ impl<'a, U: hil::usb::UsbController<'a>, A: 'a + Alarm<'a>> uart::Receive<'a> fo
         }
     }
 
-    fn receive_abort(&self) -> Result<(), ErrorCode> {
+    fn receive_abort(&self) -> uart::AbortResult {
         if self.rx_buffer.is_none() {
             // If we have nothing pending then aborting is very easy.
-            Ok(())
+            uart::AbortResult::NoCallback
         } else {
             // If we do have a receive pending then we need to start a deferred
             // call to set the callback and return `BUSY`.
             self.deferred_call_pending_abortrx.set(true);
             self.handle.map(|handle| self.deferred_caller.set(*handle));
-            Err(ErrorCode::BUSY)
+            uart::AbortResult::Callback(true);
         }
     }
 
-    fn receive_word(&self) -> Result<(), ErrorCode> {
+    fn receive_character(&self) -> Result<(), ErrorCode> {
         Err(ErrorCode::FAIL)
     }
 }
