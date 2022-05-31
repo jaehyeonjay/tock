@@ -82,7 +82,7 @@ pub mod text_screen;
 pub mod tickv;
 pub mod touch;
 pub mod tsl2561;
-//pub mod usb;
+pub mod usb;
 pub mod virtual_adc;
 pub mod virtual_aes_ccm;
 pub mod virtual_alarm;
