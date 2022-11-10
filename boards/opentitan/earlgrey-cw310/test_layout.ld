@@ -1,11 +1,16 @@
+/*
+ * This is used when building test binaries with `make test`.
+ * It reduces the size for apps, as we don't use apps with the test
+ * binaries.
+ */
+
 MEMORY
 {
-  rom   (rx)  : ORIGIN = 0x20000000, LENGTH = 0x30000
-  /* The Nexys video has half the amount of flash.
-   * So we only support up to 0x2006_0000 for apps
-   * and 0x2006_0000 to 0x2008_0000 is for flash storage.
+  rom   (rx)  : ORIGIN = 0x20000000, LENGTH = 0x60000
+  /* Support up to 0x2009_0000 for apps
+   * and 0x2009_0000 to 0x2010_0000 is for flash storage.
    */
-  prog  (rx)  : ORIGIN = 0x20030000, LENGTH = 0x30000
+  prog  (rx)  : ORIGIN = 0x20060000, LENGTH = 0x30000
   ram   (!rx) : ORIGIN = 0x10000000, LENGTH = 0x10000
 }
 
