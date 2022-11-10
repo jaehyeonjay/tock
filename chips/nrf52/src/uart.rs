@@ -5,9 +5,16 @@
 //!
 //! * Author: Niklas Adolfsson <niklasadolfsson1@gmail.com>
 //! * Date: March 10 2018
+//!
+//! * Updated to conform to new HIL TRD 
+//! * Contributor: Tristen Nollman <tristen@tristen.wtf>
+//! * Date: May 2022
 
 use core;
 use core::cell::Cell;
+
+
+
 use core::cmp::min;
 use kernel::hil;
 use kernel::hil::uart;
