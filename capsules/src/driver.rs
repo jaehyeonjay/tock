@@ -46,7 +46,6 @@ pub enum NUM {
     AppFlash              = 0x50000,
     NvmStorage            = 0x50001,
     SdCard                = 0x50002,
-    KVSystem              = 0x50003,
 
     // Sensors
     Temperature           = 0x60000,
@@ -63,7 +62,6 @@ pub enum NUM {
     L3gd20                = 0x70005,
     Lsm303dlch            = 0x70006,
     Mlx90614              = 0x70007,
-    Lsm6dsoxtr            = 0x70008,
 
     // Other ICs
     Ltc294x               = 0x80000,

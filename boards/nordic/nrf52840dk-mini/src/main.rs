@@ -13,10 +13,7 @@ use kernel::component::Component;
 use kernel::dynamic_deferred_call::{DynamicDeferredCall, DynamicDeferredCallClientState};
 use kernel::hil::led::LedLow;
 use kernel::hil::time::Counter;
-<<<<<<< HEAD
 use kernel::hil::uart::{Receive, Transmit};
-=======
->>>>>>> origin/trd-uart-final
 use kernel::platform::{KernelResources, SyscallDriverLookup};
 use kernel::scheduler::round_robin::RoundRobinSched;
 #[allow(unused_imports)]
@@ -51,10 +48,6 @@ static mut PROCESSES: [Option<&'static dyn kernel::process::Process>; NUM_PROCS]
     [None; NUM_PROCS];
 
 static mut CHIP: Option<&'static nrf52840::chip::NRF52<Nrf52840DefaultPeripherals>> = None;
-<<<<<<< HEAD
-=======
-static mut PROCESS_PRINTER: Option<&'static kernel::process::ProcessPrinterText> = None;
->>>>>>> origin/trd-uart-final
 
 /// Dummy buffer that causes the linker to reserve enough space for the stack.
 #[no_mangle]
@@ -66,10 +59,6 @@ pub struct Platform {
     led: &'static capsules::led::LedDriver<
         'static,
         kernel::hil::led::LedLow<'static, nrf52840::gpio::GPIOPin<'static>>,
-<<<<<<< HEAD
-=======
-        4,
->>>>>>> origin/trd-uart-final
     >,
     alarm: &'static capsules::alarm::AlarmDriver<
         'static,
@@ -153,22 +142,15 @@ pub unsafe fn main() {
 
     let board_kernel = static_init!(kernel::Kernel, kernel::Kernel::new(&PROCESSES));
 
-<<<<<<< HEAD
     let led = components::led::LedsComponent::new(components::led_component_helper!(
-=======
-    let led = components::led::LedsComponent::new().finalize(components::led_component_helper!(
->>>>>>> origin/trd-uart-final
         LedLow<'static, nrf52840::gpio::GPIOPin>,
         LedLow::new(&nrf52840_peripherals.gpio_port[LED1_PIN]),
         LedLow::new(&nrf52840_peripherals.gpio_port[LED2_PIN]),
         LedLow::new(&nrf52840_peripherals.gpio_port[LED3_PIN]),
         LedLow::new(&nrf52840_peripherals.gpio_port[LED4_PIN]),
-<<<<<<< HEAD
     ))
     .finalize(components::led_component_buf!(
         LedLow<'static, nrf52840::gpio::GPIOPin>
-=======
->>>>>>> origin/trd-uart-final
     ));
 
     let chip = static_init!(
@@ -210,13 +192,6 @@ pub unsafe fn main() {
     );
     DynamicDeferredCall::set_global_instance(dynamic_deferred_caller);
 
-<<<<<<< HEAD
-=======
-    let process_printer =
-        components::process_printer::ProcessPrinterTextComponent::new().finalize(());
-    PROCESS_PRINTER = Some(process_printer);
-
->>>>>>> origin/trd-uart-final
     // Create a shared UART channel for the console and for kernel debug.
     /*   let uart_mux =
         components::console::UartMuxComponent::new(channel, 115200, dynamic_deferred_caller)
@@ -261,7 +236,6 @@ pub unsafe fn main() {
         systick: cortexm4::systick::SysTick::new_with_calibration(64000000),
     };
 
-<<<<<<< HEAD
     // testing transmit -------------------------------
     // debug!("Start test\r\n");
     // base_peripherals.uarte0.transmit_abort();
@@ -293,10 +267,6 @@ pub unsafe fn main() {
     }
 
     debug!("end test\r\n");
-=======
-    debug!("Initialization complete. Entering main loop\r");
-    debug!("{}", &nrf52840::ficr::FICR_INSTANCE);
->>>>>>> origin/trd-uart-final
 
     /// These symbols are defined in the linker script.
     extern "C" {
@@ -330,7 +300,6 @@ pub unsafe fn main() {
         debug!("{:?}", err);
     });
 
-<<<<<<< HEAD
     board_kernel.kernel_loop::<_, _, NUM_PROCS, 0>(&platform, chip, None, &main_loop_capability);
 }
 
@@ -364,7 +333,4 @@ impl<'a> kernel::hil::uart::ReceiveClient for Echo<'a> {
             debug!("Error: {:?}", e);
         }
     }
-=======
-    board_kernel.kernel_loop::<_, _, NUM_PROCS>(&platform, chip, None, &main_loop_capability);
->>>>>>> origin/trd-uart-final
 }

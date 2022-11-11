@@ -146,7 +146,6 @@ impl<R: RegisterLongName, const V: usize> ReadWriteRiscvCsr<usize, R, V> {
     ))]
     #[inline]
     pub fn atomic_replace(&self, val_to_set: usize) -> usize {
-        use core::arch::asm;
         let r: usize;
         unsafe {
             asm!("csrrw {rd}, {csr}, {rs1}",
@@ -183,7 +182,6 @@ impl<R: RegisterLongName, const V: usize> ReadWriteRiscvCsr<usize, R, V> {
     ))]
     #[inline]
     pub fn read_and_set_bits(&self, bitmask: usize) -> usize {
-        use core::arch::asm;
         let r: usize;
         unsafe {
             asm!("csrrs {rd}, {csr}, {rs1}",
@@ -220,7 +218,6 @@ impl<R: RegisterLongName, const V: usize> ReadWriteRiscvCsr<usize, R, V> {
     ))]
     #[inline]
     pub fn read_and_clear_bits(&self, bitmask: usize) -> usize {
-        use core::arch::asm;
         let r: usize;
         unsafe {
             asm!("csrrc {rd}, {csr}, {rs1}",
@@ -281,7 +278,6 @@ impl<R: RegisterLongName, const V: usize> Readable for ReadWriteRiscvCsr<usize, 
     ))]
     #[inline]
     fn get(&self) -> usize {
-        use core::arch::asm;
         let r: usize;
         unsafe {
             asm!("csrr {rd}, {csr}", rd = out(reg) r, csr = const V);
@@ -306,7 +302,6 @@ impl<R: RegisterLongName, const V: usize> Writeable for ReadWriteRiscvCsr<usize,
     ))]
     #[inline]
     fn set(&self, val_to_set: usize) {
-        use core::arch::asm;
         unsafe {
             asm!("csrw {csr}, {rs}", rs = in(reg) val_to_set, csr = const V);
         }

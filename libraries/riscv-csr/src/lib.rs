@@ -2,7 +2,8 @@
 //!
 //! Uses the Tock Register Interface to control RISC-V CSRs.
 
-#![feature(asm_const)]
+#![feature(asm)]
+#![feature(const_fn_trait_bound)]
 #![no_std]
 
 pub mod csr;

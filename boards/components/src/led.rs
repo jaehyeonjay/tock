@@ -13,7 +13,6 @@
 //! ```
 
 use capsules::led::LedDriver;
-use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use kernel::component::Component;
 use kernel::hil::led::Led;
@@ -22,12 +21,11 @@ use kernel::static_init_half;
 #[macro_export]
 macro_rules! led_component_helper {
     ($Led:ty, $($L:expr),+ $(,)?) => {{
-        use capsules::led::LedDriver;
-        use core::mem::MaybeUninit;
         use kernel::count_expressions;
         use kernel::static_init;
         const NUM_LEDS: usize = count_expressions!($($L),+);
-        let arr = static_init!(
+
+        static_init!(
             [&'static $Led; NUM_LEDS],
             [
                 $(
@@ -37,37 +35,39 @@ macro_rules! led_component_helper {
                     )
                 ),+
             ]
-        );
-
-        static mut BUF: MaybeUninit<LedDriver<'static, $Led, NUM_LEDS>> = MaybeUninit::uninit();
-        (&mut BUF, arr)
+        )
     };};
 }
 
-pub struct LedsComponent<L: 'static + Led, const NUM_LEDS: usize> {
-    _phantom: PhantomData<L>,
+#[macro_export]
+macro_rules! led_component_buf {
+    ($Led:ty $(,)?) => {{
+        use capsules::led::LedDriver;
+        use core::mem::MaybeUninit;
+        static mut BUF: MaybeUninit<LedDriver<'static, $Led>> = MaybeUninit::uninit();
+        &mut BUF
+    };};
 }
 
-impl<L: 'static + Led, const NUM_LEDS: usize> LedsComponent<L, NUM_LEDS> {
-    pub fn new() -> Self {
-        Self {
-            _phantom: PhantomData,
-        }
+pub struct LedsComponent<L: 'static + Led> {
+    leds: &'static mut [&'static L],
+}
+
+impl<L: 'static + Led> LedsComponent<L> {
+    pub fn new(leds: &'static mut [&'static L]) -> Self {
+        Self { leds }
     }
 }
 
-impl<L: 'static + Led, const NUM_LEDS: usize> Component for LedsComponent<L, NUM_LEDS> {
-    type StaticInput = (
-        &'static mut MaybeUninit<LedDriver<'static, L, NUM_LEDS>>,
-        &'static mut [&'static L; NUM_LEDS],
-    );
-    type Output = &'static LedDriver<'static, L, NUM_LEDS>;
+impl<L: 'static + Led> Component for LedsComponent<L> {
+    type StaticInput = &'static mut MaybeUninit<LedDriver<'static, L>>;
+    type Output = &'static LedDriver<'static, L>;
 
     unsafe fn finalize(self, static_buffer: Self::StaticInput) -> Self::Output {
         static_init_half!(
-            static_buffer.0,
-            LedDriver<'static, L, NUM_LEDS>,
-            LedDriver::new(static_buffer.1)
+            static_buffer,
+            LedDriver<'static, L>,
+            LedDriver::new(self.leds)
         )
     }
 }

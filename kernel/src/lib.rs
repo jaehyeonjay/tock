@@ -85,7 +85,7 @@
 //!    this use case. It is likely we will have to create new interfaces as new
 //!    use cases are discovered.
 
-#![feature(core_intrinsics)]
+#![feature(core_intrinsics, const_fn_trait_bound)]
 #![warn(unreachable_pub)]
 #![no_std]
 
@@ -108,7 +108,6 @@ pub mod platform;
 pub mod process;
 pub mod processbuffer;
 pub mod scheduler;
-pub mod storage_permissions;
 pub mod syscall;
 pub mod upcall;
 pub mod utilities;
@@ -117,7 +116,6 @@ mod config;
 mod kernel;
 mod memop;
 mod process_policies;
-mod process_printer;
 mod process_standard;
 mod process_utilities;
 mod syscall_driver;

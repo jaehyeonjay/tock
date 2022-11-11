@@ -9,7 +9,6 @@ use sam4l;
 
 use crate::CHIP;
 use crate::PROCESSES;
-use crate::PROCESS_PRINTER;
 
 struct Writer {
     initialized: bool,
@@ -65,6 +64,5 @@ pub unsafe extern "C" fn panic_fmt(pi: &PanicInfo) -> ! {
         &cortexm4::support::nop,
         &PROCESSES,
         &CHIP,
-        &PROCESS_PRINTER,
     )
 }

@@ -6,7 +6,6 @@ use kernel::debug::IoWrite;
 
 use crate::CHIP;
 use crate::PROCESSES;
-use crate::PROCESS_PRINTER;
 
 struct Writer {}
 
@@ -58,7 +57,6 @@ pub unsafe extern "C" fn panic_fmt(pi: &PanicInfo) -> ! {
         &rv32i::support::nop,
         &PROCESSES,
         &CHIP,
-        &PROCESS_PRINTER,
     )
 }
 
@@ -68,14 +66,7 @@ pub unsafe extern "C" fn panic_fmt(pi: &PanicInfo) -> ! {
 pub unsafe extern "C" fn panic_fmt(pi: &PanicInfo) -> ! {
     let writer = &mut WRITER;
 
-    debug::panic_print(
-        writer,
-        pi,
-        &rv32i::support::nop,
-        &PROCESSES,
-        &CHIP,
-        &PROCESS_PRINTER,
-    );
+    debug::panic_print(writer, pi, &rv32i::support::nop, &PROCESSES, &CHIP);
 
     let _ = writeln!(writer, "{}", pi);
     // Exit QEMU with a return code of 1

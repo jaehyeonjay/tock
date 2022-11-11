@@ -1,6 +1,5 @@
 use crate::CHIP;
 use crate::PROCESSES;
-use crate::PROCESS_PRINTER;
 
 use core::fmt::Write;
 use core::panic::PanicInfo;
@@ -48,6 +47,5 @@ pub unsafe extern "C" fn panic_fmt(info: &PanicInfo) -> ! {
         &cortexm4::support::nop,
         &PROCESSES,
         &CHIP,
-        &PROCESS_PRINTER,
     )
 }

@@ -84,8 +84,6 @@ impl<A: 'static + time::Alarm<'static>> Component for Isl29035Component<A> {
             VirtualMuxAlarm<'static, A>,
             VirtualMuxAlarm::new(self.alarm_mux)
         );
-        isl29035_virtual_alarm.setup();
-
         let isl29035 = static_init_half!(
             static_buffer.1,
             Isl29035<'static, VirtualMuxAlarm<'static, A>>,
@@ -136,8 +134,6 @@ impl<A: 'static + time::Alarm<'static>> Component for AmbientLightComponent<A> {
             VirtualMuxAlarm<'static, A>,
             VirtualMuxAlarm::new(self.alarm_mux)
         );
-        isl29035_virtual_alarm.setup();
-
         let isl29035 = static_init_half!(
             static_buffer.1,
             Isl29035<'static, VirtualMuxAlarm<'static, A>>,

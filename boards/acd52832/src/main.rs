@@ -48,6 +48,7 @@ const FAULT_RESPONSE: kernel::process::PanicFaultPolicy = kernel::process::Panic
 
 // Number of concurrent processes this platform supports.
 const NUM_PROCS: usize = 4;
+const NUM_UPCALLS_IPC: usize = NUM_PROCS + 1;
 
 static mut PROCESSES: [Option<&'static dyn kernel::process::Process>; NUM_PROCS] =
     [None; NUM_PROCS];
@@ -70,11 +71,10 @@ pub struct Platform {
     led: &'static capsules::led::LedDriver<
         'static,
         LedLow<'static, nrf52832::gpio::GPIOPin<'static>>,
-        4,
     >,
     rng: &'static capsules::rng::RngDriver<'static>,
     temp: &'static capsules::temperature::TemperatureSensor<'static>,
-    ipc: kernel::ipc::IPC<NUM_PROCS>,
+    ipc: kernel::ipc::IPC<NUM_PROCS, NUM_UPCALLS_IPC>,
     alarm: &'static capsules::alarm::AlarmDriver<
         'static,
         VirtualMuxAlarm<'static, nrf52832::rtc::Rtc<'static>>,
@@ -227,12 +227,15 @@ pub unsafe fn main() {
     //
     // LEDs
     //
-    let led = components::led::LedsComponent::new().finalize(components::led_component_helper!(
+    let led = components::led::LedsComponent::new(components::led_component_helper!(
         LedLow<'static, nrf52832::gpio::GPIOPin>,
         LedLow::new(&nrf52832_peripherals.gpio_port[LED1_PIN]),
         LedLow::new(&nrf52832_peripherals.gpio_port[LED2_PIN]),
         LedLow::new(&nrf52832_peripherals.gpio_port[LED3_PIN]),
         LedLow::new(&nrf52832_peripherals.gpio_port[LED4_PIN]),
+    ))
+    .finalize(components::led_component_buf!(
+        LedLow<'static, nrf52832::gpio::GPIOPin>
     ));
 
     //
@@ -291,7 +294,6 @@ pub unsafe fn main() {
         capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52832::rtc::Rtc>,
         capsules::virtual_alarm::VirtualMuxAlarm::new(mux_alarm)
     );
-    alarm_driver_virtual_alarm.setup();
 
     // Userspace timer driver
     let alarm = static_init!(
@@ -329,7 +331,7 @@ pub unsafe fn main() {
         capsules::console::DRIVER_NUM,
         uart_mux,
     )
-    .finalize(components::console_component_helper!());
+    .finalize(());
     // Create the debugger object that handles calls to `debug!()`.
     components::debug_writer::DebugWriterComponent::new(uart_mux).finalize(());
 
@@ -505,8 +507,6 @@ pub unsafe fn main() {
         capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf52832::rtc::Rtc>,
         capsules::virtual_alarm::VirtualMuxAlarm::new(mux_alarm)
     );
-    virtual_alarm_buzzer.setup();
-
     let buzzer = static_init!(
         capsules::buzzer_driver::Buzzer<
             'static,
@@ -572,7 +572,7 @@ pub unsafe fn main() {
     debug!("Initialization complete. Entering main loop\r");
     debug!("{}", &nrf52832::ficr::FICR_INSTANCE);
 
-    // These symbols are defined in the linker script.
+    /// These symbols are defined in the linker script.
     extern "C" {
         /// Beginning of the ROM region containing app images.
         static _sapps: u8;

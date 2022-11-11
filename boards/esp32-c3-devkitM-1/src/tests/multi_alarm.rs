@@ -15,7 +15,7 @@ use crate::tests::run_kernel_op;
 use crate::ALARM;
 use capsules::test::random_alarm::TestRandomAlarm;
 use capsules::virtual_alarm::{MuxAlarm, VirtualMuxAlarm};
-use esp32_c3::timg::TimG;
+use esp32::timg::TimG;
 use kernel::debug;
 use kernel::hil::time::Alarm;
 use kernel::static_init;
@@ -43,7 +43,7 @@ pub fn run_multi_alarm() {
     }
 
     debug!("    [ok]");
-    run_kernel_op(10000);
+    run_kernel_op(100);
 }
 
 unsafe fn static_init_multi_alarm_test(
@@ -53,11 +53,9 @@ unsafe fn static_init_multi_alarm_test(
         VirtualMuxAlarm<'static, TimG<'static>>,
         VirtualMuxAlarm::new(mux)
     );
-    virtual_alarm1.setup();
-
     let test1 = static_init!(
         TestRandomAlarm<'static, VirtualMuxAlarm<'static, TimG<'static>>>,
-        TestRandomAlarm::new(virtual_alarm1, 19, 'A', false)
+        TestRandomAlarm::new(virtual_alarm1, 19, 'A')
     );
     virtual_alarm1.set_alarm_client(test1);
 
@@ -65,11 +63,9 @@ unsafe fn static_init_multi_alarm_test(
         VirtualMuxAlarm<'static, TimG<'static>>,
         VirtualMuxAlarm::new(mux)
     );
-    virtual_alarm2.setup();
-
     let test2 = static_init!(
         TestRandomAlarm<'static, VirtualMuxAlarm<'static, TimG<'static>>>,
-        TestRandomAlarm::new(virtual_alarm2, 37, 'B', false)
+        TestRandomAlarm::new(virtual_alarm2, 37, 'B')
     );
     virtual_alarm2.set_alarm_client(test2);
 
@@ -77,11 +73,9 @@ unsafe fn static_init_multi_alarm_test(
         VirtualMuxAlarm<'static, TimG<'static>>,
         VirtualMuxAlarm::new(mux)
     );
-    virtual_alarm3.setup();
-
     let test3 = static_init!(
         TestRandomAlarm<'static, VirtualMuxAlarm<'static, TimG<'static>>>,
-        TestRandomAlarm::new(virtual_alarm3, 89, 'C', false)
+        TestRandomAlarm::new(virtual_alarm3, 89, 'C')
     );
     virtual_alarm3.set_alarm_client(test3);
     [&*test1, &*test2, &*test3]

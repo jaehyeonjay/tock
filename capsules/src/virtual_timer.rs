@@ -12,9 +12,10 @@ use crate::virtual_alarm::VirtualMuxAlarm;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 enum Mode {
-    Disabled,
-    OneShot,
-    Repeating,
+    Uninserted = 0,
+    Disabled = 1,
+    OneShot = 2,
+    Repeating = 3,
 }
 
 /// An object to multiplex multiple "virtual" timers over a single underlying alarm. A
@@ -41,28 +42,28 @@ impl<'a, A: Alarm<'a>> ListNode<'a, VirtualTimer<'a, A>> for VirtualTimer<'a, A>
 }
 
 impl<'a, A: Alarm<'a>> VirtualTimer<'a, A> {
-    /// After calling new, always call setup()
     pub fn new(mux_timer: &'a MuxTimer<'a, A>) -> VirtualTimer<'a, A> {
         let zero = A::Ticks::from(0);
         let v = VirtualTimer {
             mux: mux_timer,
             when: Cell::new(zero),
             interval: Cell::new(zero),
-            mode: Cell::new(Mode::Disabled),
+            mode: Cell::new(Mode::Uninserted),
             next: ListLink::empty(),
             client: OptionalCell::empty(),
         };
         v
     }
 
-    /// Call this method immediately after new() to link this to the mux, otherwise timers won't
-    /// fire
-    pub fn setup(&'a self) {
-        self.mux.timers.push_head(&self);
-    }
+    // Start a new timer, configuring its mode and adjusting the
+    // underlying alarm if needed.
+    fn insert_timer(&'a self, interval: A::Ticks, mode: Mode) -> A::Ticks {
+        // First time, add to list
+        if self.mode.get() == Mode::Uninserted {
+            self.mux.timers.push_head(&self);
+            self.mode.set(Mode::Disabled);
+        }
 
-    // Start a new timer, configuring its mode and adjusting the underlying alarm if needed.
-    fn start_timer(&self, interval: A::Ticks, mode: Mode) -> A::Ticks {
         if self.mode.get() == Mode::Disabled {
             self.mux.enabled.increment();
         }
@@ -93,13 +94,13 @@ impl<'a, A: Alarm<'a>> Time for VirtualTimer<'a, A> {
 }
 
 impl<'a, A: Alarm<'a>> Timer<'a> for VirtualTimer<'a, A> {
-    fn set_timer_client(&self, client: &'a dyn time::TimerClient) {
+    fn set_timer_client(&'a self, client: &'a dyn time::TimerClient) {
         self.client.set(client);
     }
 
     fn cancel(&self) -> Result<(), ErrorCode> {
         match self.mode.get() {
-            Mode::Disabled => Ok(()),
+            Mode::Uninserted | Mode::Disabled => Ok(()),
             Mode::OneShot | Mode::Repeating => {
                 self.mode.set(Mode::Disabled);
                 self.mux.enabled.decrement();
@@ -116,7 +117,7 @@ impl<'a, A: Alarm<'a>> Timer<'a> for VirtualTimer<'a, A> {
 
     fn interval(&self) -> Option<Self::Ticks> {
         match self.mode.get() {
-            Mode::Disabled => None,
+            Mode::Uninserted | Mode::Disabled => None,
             Mode::OneShot | Mode::Repeating => Some(self.interval.get()),
         }
     }
@@ -131,22 +132,24 @@ impl<'a, A: Alarm<'a>> Timer<'a> for VirtualTimer<'a, A> {
 
     fn is_enabled(&self) -> bool {
         match self.mode.get() {
+            Mode::Uninserted => false,
             Mode::Disabled => false,
-            Mode::OneShot | Mode::Repeating => true,
+            Mode::OneShot => true,
+            Mode::Repeating => true,
         }
     }
 
-    fn oneshot(&self, interval: Self::Ticks) -> Self::Ticks {
-        self.start_timer(interval, Mode::OneShot)
+    fn oneshot(&'a self, interval: Self::Ticks) -> Self::Ticks {
+        self.insert_timer(interval, Mode::OneShot)
     }
 
-    fn repeating(&self, interval: Self::Ticks) -> Self::Ticks {
-        self.start_timer(interval, Mode::Repeating)
+    fn repeating(&'a self, interval: Self::Ticks) -> Self::Ticks {
+        self.insert_timer(interval, Mode::Repeating)
     }
 
     fn time_remaining(&self) -> Option<Self::Ticks> {
         match self.mode.get() {
-            Mode::Disabled => None,
+            Mode::Uninserted | Mode::Disabled => None,
             Mode::OneShot | Mode::Repeating => {
                 let when = self.when.get();
                 let now = self.mux.alarm.now();
@@ -159,7 +162,7 @@ impl<'a, A: Alarm<'a>> Timer<'a> for VirtualTimer<'a, A> {
 impl<'a, A: Alarm<'a>> time::AlarmClient for VirtualTimer<'a, A> {
     fn alarm(&self) {
         match self.mode.get() {
-            Mode::Disabled => {} // Do nothing
+            Mode::Uninserted | Mode::Disabled => {} // Do nothing
             Mode::OneShot => {
                 self.mode.set(Mode::Disabled);
                 self.client.map(|client| client.timer());
@@ -197,7 +200,7 @@ impl<'a, A: Alarm<'a>> MuxTimer<'a, A> {
         }
     }
 
-    fn calculate_alarm(&self, now: A::Ticks, interval: A::Ticks) {
+    fn calculate_alarm(&'a self, now: A::Ticks, interval: A::Ticks) {
         if self.enabled.get() == 1 {
             // First alarm, to just set it
             self.alarm.set_alarm(now, interval);

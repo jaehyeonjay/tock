@@ -52,6 +52,7 @@
 
 use kernel::hil::led;
 use kernel::syscall::{CommandReturn, SyscallDriver};
+use kernel::utilities::cells::TakeCell;
 use kernel::{ErrorCode, ProcessId};
 
 /// Syscall driver number.
@@ -60,23 +61,25 @@ pub const DRIVER_NUM: usize = driver::NUM::Led as usize;
 
 /// Holds the array of LEDs and implements a `Driver` interface to
 /// control them.
-pub struct LedDriver<'a, L: led::Led, const NUM_LEDS: usize> {
-    leds: &'a mut [&'a L; NUM_LEDS],
+pub struct LedDriver<'a, L: led::Led> {
+    leds: TakeCell<'a, [&'a L]>,
 }
 
-impl<'a, L: led::Led, const NUM_LEDS: usize> LedDriver<'a, L, NUM_LEDS> {
-    pub fn new(leds: &'a mut [&'a L; NUM_LEDS]) -> Self {
+impl<'a, L: led::Led> LedDriver<'a, L> {
+    pub fn new(leds: &'a mut [&'a L]) -> Self {
         // Initialize all LEDs and turn them off
         for led in leds.iter_mut() {
             led.init();
             led.off();
         }
 
-        Self { leds: leds }
+        Self {
+            leds: TakeCell::new(leds),
+        }
     }
 }
 
-impl<L: led::Led, const NUM_LEDS: usize> SyscallDriver for LedDriver<'_, L, NUM_LEDS> {
+impl<L: led::Led> SyscallDriver for LedDriver<'_, L> {
     /// Control the LEDs.
     ///
     /// ### `command_num`
@@ -90,43 +93,46 @@ impl<L: led::Led, const NUM_LEDS: usize> SyscallDriver for LedDriver<'_, L, NUM_
     /// - `3`: Toggle the LED at index specified by `data` on or off. Returns
     ///        `INVAL` if the LED index is not valid.
     fn command(&self, command_num: usize, data: usize, _: usize, _: ProcessId) -> CommandReturn {
-        match command_num {
-            // get number of LEDs
-            0 => CommandReturn::success_u32(NUM_LEDS as u32),
+        self.leds
+            .map(|leds| {
+                match command_num {
+                    // get number of LEDs
+                    0 => CommandReturn::success_u32(leds.len() as u32),
+                    // on
+                    1 => {
+                        if data >= leds.len() {
+                            CommandReturn::failure(ErrorCode::INVAL) /* led out of range */
+                        } else {
+                            leds[data].on();
+                            CommandReturn::success()
+                        }
+                    }
 
-            // on
-            1 => {
-                if data >= NUM_LEDS {
-                    CommandReturn::failure(ErrorCode::INVAL) /* led out of range */
-                } else {
-                    self.leds[data].on();
-                    CommandReturn::success()
+                    // off
+                    2 => {
+                        if data >= leds.len() {
+                            CommandReturn::failure(ErrorCode::INVAL) /* led out of range */
+                        } else {
+                            leds[data].off();
+                            CommandReturn::success()
+                        }
+                    }
+
+                    // toggle
+                    3 => {
+                        if data >= leds.len() {
+                            CommandReturn::failure(ErrorCode::INVAL) /* led out of range */
+                        } else {
+                            leds[data].toggle();
+                            CommandReturn::success()
+                        }
+                    }
+
+                    // default
+                    _ => CommandReturn::failure(ErrorCode::NOSUPPORT),
                 }
-            }
-
-            // off
-            2 => {
-                if data >= NUM_LEDS {
-                    CommandReturn::failure(ErrorCode::INVAL) /* led out of range */
-                } else {
-                    self.leds[data].off();
-                    CommandReturn::success()
-                }
-            }
-
-            // toggle
-            3 => {
-                if data >= NUM_LEDS {
-                    CommandReturn::failure(ErrorCode::INVAL) /* led out of range */
-                } else {
-                    self.leds[data].toggle();
-                    CommandReturn::success()
-                }
-            }
-
-            // default
-            _ => CommandReturn::failure(ErrorCode::NOSUPPORT),
-        }
+            })
+            .expect("LEDs slice taken")
     }
 
     fn allocate_grant(&self, _processid: ProcessId) -> Result<(), kernel::process::Error> {

@@ -9,10 +9,6 @@ use sam4l;
 
 use crate::CHIP;
 use crate::PROCESSES;
-<<<<<<< HEAD
-=======
-use crate::PROCESS_PRINTER;
->>>>>>> origin/trd-uart-final
 
 struct Writer {
     initialized: bool,
@@ -68,9 +64,5 @@ pub unsafe extern "C" fn panic_fmt(pi: &PanicInfo) -> ! {
         &cortexm4::support::nop,
         &PROCESSES,
         &CHIP,
-<<<<<<< HEAD
-=======
-        &PROCESS_PRINTER,
->>>>>>> origin/trd-uart-final
     )
 }

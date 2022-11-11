@@ -35,6 +35,7 @@
 
 use core::cell::Cell;
 use core::cmp;
+use core::convert::TryInto;
 use kernel::hil;
 use kernel::utilities::cells::NumericCellExt;
 use kernel::utilities::cells::{OptionalCell, TakeCell};
@@ -120,9 +121,11 @@ impl<'a, F: hil::flash::Flash> hil::nonvolatile_storage::NonvolatileStorage<'sta
 
                 match self.driver.read_page(address / page_size, pagebuffer) {
                     Ok(()) => Ok(()),
-                    Err((error_code, pagebuffer)) => {
+                    Err((return_code, pagebuffer)) => {
                         self.pagebuffer.replace(pagebuffer);
-                        Err(error_code)
+                        Err(return_code
+                            .try_into()
+                            .expect("Result<(), ErrorCode> success variant in error case"))
                     }
                 }
             })
@@ -162,9 +165,11 @@ impl<'a, F: hil::flash::Flash> hil::nonvolatile_storage::NonvolatileStorage<'sta
 
                     match self.driver.write_page(address / page_size, pagebuffer) {
                         Ok(()) => Ok(()),
-                        Err((error_code, pagebuffer)) => {
+                        Err((return_code, pagebuffer)) => {
                             self.pagebuffer.replace(pagebuffer);
-                            Err(error_code)
+                            Err(return_code
+                                .try_into()
+                                .expect("Result<(), ErrorCode> success variant in error case"))
                         }
                     }
                 } else {
@@ -176,9 +181,11 @@ impl<'a, F: hil::flash::Flash> hil::nonvolatile_storage::NonvolatileStorage<'sta
 
                     match self.driver.read_page(address / page_size, pagebuffer) {
                         Ok(()) => Ok(()),
-                        Err((error_code, pagebuffer)) => {
+                        Err((return_code, pagebuffer)) => {
                             self.pagebuffer.replace(pagebuffer);
-                            Err(error_code)
+                            Err(return_code
+                                .try_into()
+                                .expect("Result<(), ErrorCode> success variant in error case"))
                         }
                     }
                 }

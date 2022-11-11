@@ -717,11 +717,17 @@ impl<'p> Radio<'p> {
         self.registers.event_ready.write(Event::READY::CLEAR);
 
         if self.transmitting.get() {
-            let tbuf = self.tx_buf.take().unwrap(); // Unwrap fail = Radio TX Buffer produced an invalid result when setting the DMA pointer.
+            let tbuf = self
+                .tx_buf
+                .take()
+                .expect("Radio TX Buffer produced an invalid result when setting the DMA pointer.");
 
             self.tx_buf.replace(self.set_dma_ptr(tbuf));
         } else {
-            let rbuf = self.rx_buf.take().unwrap(); // Unwrap fail = Radio RX Buffer produced an invalid result when setting the DMA pointer.
+            let rbuf = self
+                .rx_buf
+                .take()
+                .expect("Radio RX Buffer produced an invalid result when setting the DMA pointer.");
             self.rx_buf.replace(self.set_dma_ptr(rbuf));
         }
 
@@ -806,7 +812,7 @@ impl<'p> Radio<'p> {
                 self.cca_be.set(self.cca_be.get() + 1);
                 let backoff_periods = self.random_nonce() & ((1 << self.cca_be.get()) - 1);
                 self.timer0
-                    .unwrap_or_panic() // Unwrap fail = Missing timer reference for CSMA
+                    .expect("Missing timer reference for CSMA")
                     .set_alarm(
                         kernel::hil::time::Ticks32::from(0),
                         kernel::hil::time::Ticks32::from(
@@ -818,10 +824,11 @@ impl<'p> Radio<'p> {
                 //if we are transmitting, the CRCstatus check is always going to be an error
                 let result = Err(ErrorCode::BUSY);
                 //TODO: Acked is flagged as false until I get around to fixing it.
-                self.tx_client.map(|client| {
-                    let tbuf = self.tx_buf.take().unwrap(); // Unwrap fail = TX Buffer produced error when sending it back to the requestor after the channel was busy.
-                    client.send_done(tbuf, false, result)
-                });
+                self.tx_client
+                    .map(|client| {
+                        let tbuf = self.tx_buf.take().expect("TX Buffer produced error when sending it back to the requestor after the channel was busy.");
+                        client.send_done(tbuf, false, result)
+                    });
             }
 
             self.enable_interrupts();
@@ -846,10 +853,11 @@ impl<'p> Radio<'p> {
                     //if we are transmitting, the CRCstatus check is always going to be an error
                     let result = Ok(());
                     //TODO: Acked is flagged as false until I get around to fixing it.
-                    self.tx_client.map(|client| {
-                        let tbuf = self.tx_buf.take().unwrap(); // Unwrap fail = TX Buffer produced error when sending it back to the requestor after successful transmission.
+                    self.tx_client
+                        .map(|client|{
+                        let tbuf = self.tx_buf.take().expect("TX Buffer produced error when sending it back to the requestor after successful transmission.");
 
-                        client.send_done(tbuf, false, result)
+                         client.send_done(tbuf, false, result)
                     });
                 }
                 nrf5x::constants::RADIO_STATE_RXRU
@@ -857,7 +865,9 @@ impl<'p> Radio<'p> {
                 | nrf5x::constants::RADIO_STATE_RXDISABLE
                 | nrf5x::constants::RADIO_STATE_RX => {
                     self.rx_client.map(|client| {
-                        let rbuf = self.rx_buf.take().unwrap(); // Unwrap fail = RX Buffer produced error when sending received packet to requestor
+                        let rbuf = self.rx_buf.take().expect(
+                            "RX Buffer produced error when sending received packet to requestor",
+                        );
 
                         let frame_len = rbuf[MIMIC_PSDU_OFFSET as usize] as usize - radio::MFR_SIZE;
                         // Length is: S0 (0 Byte) + Length (1 Byte) + S1 (0 Bytes) + Payload

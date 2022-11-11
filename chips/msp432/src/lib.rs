@@ -1,5 +1,6 @@
 #![crate_name = "msp432"]
 #![crate_type = "rlib"]
+#![feature(asm, const_fn_trait_bound)]
 #![no_std]
 
 use cortexm4::{

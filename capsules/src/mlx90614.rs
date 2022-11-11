@@ -19,7 +19,7 @@ use core::cell::Cell;
 use enum_primitive::cast::FromPrimitive;
 use enum_primitive::enum_from_primitive;
 
-use kernel::grant::{AllowRoCount, AllowRwCount, Grant, UpcallCount};
+use kernel::grant::Grant;
 use kernel::hil::i2c;
 use kernel::hil::sensors;
 use kernel::syscall::{CommandReturn, SyscallDriver};
@@ -69,7 +69,7 @@ pub struct Mlx90614SMBus<'a> {
     temperature_client: OptionalCell<&'a dyn sensors::TemperatureClient>,
     buffer: TakeCell<'static, [u8]>,
     state: Cell<State>,
-    apps: Grant<App, UpcallCount<1>, AllowRoCount<0>, AllowRwCount<0>>,
+    apps: Grant<App, 1>,
     owning_process: OptionalCell<ProcessId>,
 }
 
@@ -77,7 +77,7 @@ impl<'a> Mlx90614SMBus<'_> {
     pub fn new(
         smbus_temp: &'a dyn i2c::SMBusDevice,
         buffer: &'static mut [u8],
-        grant: Grant<App, UpcallCount<1>, AllowRoCount<0>, AllowRwCount<0>>,
+        grant: Grant<App, 1>,
     ) -> Mlx90614SMBus<'a> {
         Mlx90614SMBus {
             smbus_temp,

@@ -50,7 +50,7 @@
 
 use core::cell::Cell;
 
-use kernel::grant::{AllowRoCount, AllowRwCount, Grant, UpcallCount};
+use kernel::grant::Grant;
 use kernel::hil;
 use kernel::syscall::{CommandReturn, SyscallDriver};
 use kernel::{ErrorCode, ProcessId};
@@ -88,14 +88,14 @@ pub struct Thresholds {
 
 pub struct ProximitySensor<'a> {
     driver: &'a dyn hil::sensors::ProximityDriver<'a>,
-    apps: Grant<App, UpcallCount<1>, AllowRoCount<0>, AllowRwCount<0>>,
+    apps: Grant<App, 1>,
     command_running: Cell<ProximityCommand>,
 }
 
 impl<'a> ProximitySensor<'a> {
     pub fn new(
         driver: &'a dyn hil::sensors::ProximityDriver<'a>,
-        grant: Grant<App, UpcallCount<1>, AllowRoCount<0>, AllowRwCount<0>>,
+        grant: Grant<App, 1>,
     ) -> ProximitySensor<'a> {
         ProximitySensor {
             driver: driver,

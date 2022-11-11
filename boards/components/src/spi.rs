@@ -141,7 +141,9 @@ impl<S: 'static + spi::SpiMaster> Component for SpiMuxComponent<S> {
         );
 
         mux_spi.initialize_callback_handle(
-            self.deferred_caller.register(mux_spi).unwrap(), // Unwrap fail = no deferred call slot available for SPI mux
+            self.deferred_caller
+                .register(mux_spi)
+                .expect("no deferred call slot available for SPI mux"),
         );
 
         self.spi.set_client(mux_spi);

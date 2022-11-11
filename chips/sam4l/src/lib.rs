@@ -4,6 +4,7 @@
 
 #![crate_name = "sam4l"]
 #![crate_type = "rlib"]
+#![feature(const_fn_trait_bound)]
 #![no_std]
 
 pub mod deferred_call_tasks;

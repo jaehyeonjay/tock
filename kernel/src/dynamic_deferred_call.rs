@@ -61,7 +61,7 @@
 //!     SomeCapsule::new(dynamic_deferred_call)
 //! ) };
 //! some_capsule.set_deferred_call_handle(
-//!     dynamic_deferred_call.register(some_capsule).unwrap() // Unwrap fail = no deferred call slot available
+//!     dynamic_deferred_call.register(some_capsule).expect("no deferred call slot available")
 //! );
 //! ```
 
@@ -186,14 +186,6 @@ impl DynamicDeferredCall {
     ///
     /// On success, a `Some(handle)` will be returned. This handle is later
     /// required to schedule a deferred call.
-    ///
-    /// A given [`DynamicDeferredCallClient`] reference (client) can be
-    /// registered multiple times and will receive a different handle each
-    /// time. This mechanism is useful to distinguish between deferred calls
-    /// scheduled by the same client, but to be handled differently. Each issued
-    /// handle will occupy one [`DynamicDeferredCallClientState`] in the
-    /// [`DynamicDeferredCall`]. Clients can utilize the passed
-    /// [`DeferredCallHandle`] to distinguish between scheduled deferred calls.
     pub fn register(
         &self,
         ddc_client: &'static dyn DynamicDeferredCallClient,
@@ -269,5 +261,5 @@ pub trait DynamicDeferredCallClient {
 
 /// Unique identifier for a deferred call registered with a
 /// [DynamicDeferredCall](crate::dynamic_deferred_call::DynamicDeferredCall)
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug)]
 pub struct DeferredCallHandle(usize);

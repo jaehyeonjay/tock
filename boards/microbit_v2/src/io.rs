@@ -12,7 +12,6 @@ use kernel::hil::gpio::{Configure, Input, Output};
 
 use crate::CHIP;
 use crate::PROCESSES;
-use crate::PROCESS_PRINTER;
 
 /// Writer is used by kernel::debug to panic message to the serial port.
 pub struct Writer {
@@ -109,6 +108,5 @@ pub unsafe extern "C" fn panic_fmt(pi: &PanicInfo) -> ! {
         &cortexm4::support::nop,
         &PROCESSES,
         &CHIP,
-        &PROCESS_PRINTER,
     )
 }

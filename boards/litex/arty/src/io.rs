@@ -44,6 +44,5 @@ pub unsafe extern "C" fn panic_fmt(pi: &PanicInfo) -> ! {
         &rv32i::support::nop,
         &PROCESSES,
         &PANIC_REFERENCES.chip,
-        &PANIC_REFERENCES.process_printer,
     )
 }

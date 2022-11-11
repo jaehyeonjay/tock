@@ -125,7 +125,6 @@ impl<A: 'static + time::Alarm<'static>> Component for SeggerRttComponent<A> {
             VirtualMuxAlarm<'static, A>,
             VirtualMuxAlarm::new(self.mux_alarm)
         );
-        virtual_alarm_rtt.setup();
 
         // RTT communication channel
         let rtt = static_init_half!(

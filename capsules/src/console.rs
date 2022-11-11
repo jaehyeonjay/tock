@@ -37,8 +37,11 @@
 //! the driver. Successive writes must call `allow` each time a buffer is to be
 //! written.
 
-use kernel::grant::{AllowRoCount, AllowRwCount, Grant, GrantKernelData, UpcallCount};
+use core::{cmp, mem};
+
+use kernel::grant::Grant;
 use kernel::hil::uart;
+use kernel::processbuffer::{ReadOnlyProcessBuffer, ReadWriteProcessBuffer};
 use kernel::processbuffer::{ReadableProcessBuffer, WriteableProcessBuffer};
 use kernel::syscall::{CommandReturn, SyscallDriver};
 use kernel::utilities::cells::{OptionalCell, TakeCell};
@@ -48,40 +51,23 @@ use kernel::{ErrorCode, ProcessId};
 use crate::driver;
 pub const DRIVER_NUM: usize = driver::NUM::Console as usize;
 
-/// Default size for the read and write buffers used by the console.
-/// Boards may pass different-size buffers if needed.
-pub const DEFAULT_BUF_SIZE: usize = 64;
-
-/// Ids for read-only allow buffers
-mod ro_allow {
-    pub const WRITE: usize = 1;
-    /// The number of allow buffers the kernel stores for this grant
-    pub const COUNT: usize = 2;
-}
-
-/// Ids for read-write allow buffers
-mod rw_allow {
-    pub const READ: usize = 1;
-    /// The number of allow buffers the kernel stores for this grant
-    pub const COUNT: usize = 2;
-}
-
 #[derive(Default)]
 pub struct App {
+    write_buffer: ReadOnlyProcessBuffer,
     write_len: usize,
     write_remaining: usize, // How many bytes didn't fit in the buffer and still need to be printed.
     pending_write: bool,
+
+    read_buffer: ReadWriteProcessBuffer,
     read_len: usize,
 }
 
+pub static mut WRITE_BUF: [u8; 64] = [0; 64];
+pub static mut READ_BUF: [u8; 64] = [0; 64];
+
 pub struct Console<'a> {
     uart: &'a dyn uart::UartData<'a>,
-    apps: Grant<
-        App,
-        UpcallCount<3>,
-        AllowRoCount<{ ro_allow::COUNT }>,
-        AllowRwCount<{ rw_allow::COUNT }>,
-    >,
+    apps: Grant<App, 3>,
     tx_in_progress: OptionalCell<ProcessId>,
     tx_buffer: TakeCell<'static, [u8]>,
     rx_in_progress: OptionalCell<ProcessId>,
@@ -93,12 +79,7 @@ impl<'a> Console<'a> {
         uart: &'a dyn uart::UartData<'a>,
         tx_buffer: &'static mut [u8],
         rx_buffer: &'static mut [u8],
-        grant: Grant<
-            App,
-            UpcallCount<3>,
-            AllowRoCount<{ ro_allow::COUNT }>,
-            AllowRwCount<{ rw_allow::COUNT }>,
-        >,
+        grant: Grant<App, 3>,
     ) -> Console<'a> {
         Console {
             uart: uart,
@@ -111,75 +92,53 @@ impl<'a> Console<'a> {
     }
 
     /// Internal helper function for setting up a new send transaction
-    fn send_new(
-        &self,
-        app_id: ProcessId,
-        app: &mut App,
-        kernel_data: &GrantKernelData,
-        len: usize,
-    ) -> Result<(), ErrorCode> {
-        app.write_len = kernel_data
-            .get_readonly_processbuffer(ro_allow::WRITE)
-            .map_or(0, |write| write.len())
-            .min(len);
+    fn send_new(&self, app_id: ProcessId, app: &mut App, len: usize) -> Result<(), ErrorCode> {
+        app.write_len = cmp::min(len, app.write_buffer.len());
         app.write_remaining = app.write_len;
-        self.send(app_id, app, kernel_data);
+        self.send(app_id, app);
         Ok(())
     }
 
-    /// Internal helper function for continuing a previously set up transaction.
-    /// Returns `true` if this send is still active, or `false` if it has
-    /// completed.
+    /// Internal helper function for continuing a previously set up transaction
+    /// Returns true if this send is still active, or false if it has completed
     fn send_continue(
         &self,
         app_id: ProcessId,
         app: &mut App,
-        kernel_data: &GrantKernelData,
-    ) -> bool {
+    ) -> Result<bool, Result<(), ErrorCode>> {
         if app.write_remaining > 0 {
-            self.send(app_id, app, kernel_data);
-            true
+            self.send(app_id, app);
+            Ok(true)
         } else {
-            false
+            Ok(false)
         }
     }
 
     /// Internal helper function for sending data for an existing transaction.
     /// Cannot fail. If can't send now, it will schedule for sending later.
-    fn send(&self, app_id: ProcessId, app: &mut App, kernel_data: &GrantKernelData) {
+    fn send(&self, app_id: ProcessId, app: &mut App) {
         if self.tx_in_progress.is_none() {
             self.tx_in_progress.set(app_id);
             self.tx_buffer.take().map(|buffer| {
-                let transaction_len = kernel_data
-                    .get_readonly_processbuffer(ro_allow::WRITE)
-                    .and_then(|write| {
-                        write.enter(|data| {
-                            let remaining_data = match data
-                                .get(app.write_len - app.write_remaining..app.write_len)
-                            {
-                                Some(remaining_data) => remaining_data,
-                                None => {
-                                    // A slice has changed under us and is now
-                                    // smaller than what we need to write. Our
-                                    // behavior in this case is documented as
-                                    // undefined; the simplest thing we can do
-                                    // that doesn't panic is to abort the write.
-                                    // We update app.write_len so that the
-                                    // number of bytes written (which is passed
-                                    // to the write done upcall) is correct.
-                                    app.write_len -= app.write_remaining;
-                                    app.write_remaining = 0;
-                                    return 0;
-                                }
-                            };
-                            for (i, c) in remaining_data.iter().enumerate() {
-                                if buffer.len() <= i {
-                                    return i; // Short circuit on partial send
-                                }
-                                buffer[i] = c.get();
+                let len = app.write_buffer.enter(|data| data.len()).unwrap_or(0);
+                if app.write_remaining > len {
+                    // A slice has changed under us and is now smaller than
+                    // what we need to write -- just write what we can.
+                    app.write_remaining = len;
+                }
+                let transaction_len = app
+                    .write_buffer
+                    .enter(|data| {
+                        for (i, c) in data[data.len() - app.write_remaining..data.len()]
+                            .iter()
+                            .enumerate()
+                        {
+                            if buffer.len() <= i {
+                                return i; // Short circuit on partial send
                             }
-                            app.write_remaining
-                        })
+                            buffer[i] = c.get();
+                        }
+                        app.write_remaining
                     })
                     .unwrap_or(0);
                 app.write_remaining -= transaction_len;
@@ -191,23 +150,14 @@ impl<'a> Console<'a> {
     }
 
     /// Internal helper function for starting a receive operation
-    fn receive_new(
-        &self,
-        app_id: ProcessId,
-        app: &mut App,
-        kernel_data: &GrantKernelData,
-        len: usize,
-    ) -> Result<(), ErrorCode> {
+    fn receive_new(&self, app_id: ProcessId, app: &mut App, len: usize) -> Result<(), ErrorCode> {
         if self.rx_buffer.is_none() {
             // For now, we tolerate only one concurrent receive operation on this console.
             // Competing apps will have to retry until success.
             return Err(ErrorCode::BUSY);
         }
 
-        let read_len = kernel_data
-            .get_readwrite_processbuffer(rw_allow::READ)
-            .map_or(0, |read| read.len())
-            .min(len);
+        let read_len = cmp::min(len, app.read_buffer.len());
         if read_len > self.rx_buffer.map_or(0, |buf| buf.len()) {
             // For simplicity, impose a small maximum receive length
             // instead of doing incremental reads
@@ -230,12 +180,56 @@ impl SyscallDriver for Console<'_> {
     /// ### `allow_num`
     ///
     /// - `1`: Writeable buffer for read buffer
+    fn allow_readwrite(
+        &self,
+        appid: ProcessId,
+        allow_num: usize,
+        mut slice: ReadWriteProcessBuffer,
+    ) -> Result<ReadWriteProcessBuffer, (ReadWriteProcessBuffer, ErrorCode)> {
+        let res = match allow_num {
+            1 => self
+                .apps
+                .enter(appid, |app, _| {
+                    mem::swap(&mut app.read_buffer, &mut slice);
+                })
+                .map_err(ErrorCode::from),
+            _ => Err(ErrorCode::NOSUPPORT),
+        };
+
+        if let Err(e) = res {
+            Err((slice, e))
+        } else {
+            Ok(slice)
+        }
+    }
 
     /// Setup shared buffers.
     ///
     /// ### `allow_num`
     ///
     /// - `1`: Readonly buffer for write buffer
+    fn allow_readonly(
+        &self,
+        appid: ProcessId,
+        allow_num: usize,
+        mut slice: ReadOnlyProcessBuffer,
+    ) -> Result<ReadOnlyProcessBuffer, (ReadOnlyProcessBuffer, ErrorCode)> {
+        let res = match allow_num {
+            1 => self
+                .apps
+                .enter(appid, |app, _| {
+                    mem::swap(&mut app.write_buffer, &mut slice);
+                })
+                .map_err(ErrorCode::from),
+            _ => Err(ErrorCode::NOSUPPORT),
+        };
+
+        if let Err(e) = res {
+            Err((slice, e))
+        } else {
+            Ok(slice)
+        }
+    }
 
     // Setup callbacks.
     //
@@ -258,18 +252,18 @@ impl SyscallDriver for Console<'_> {
     fn command(&self, cmd_num: usize, arg1: usize, _: usize, appid: ProcessId) -> CommandReturn {
         let res = self
             .apps
-            .enter(appid, |app, kernel_data| {
+            .enter(appid, |app, _| {
                 match cmd_num {
                     0 => Ok(()),
                     1 => {
                         // putstr
                         let len = arg1;
-                        self.send_new(appid, app, kernel_data, len)
+                        self.send_new(appid, app, len)
                     }
                     2 => {
                         // getnstr
                         let len = arg1;
-                        self.receive_new(appid, app, kernel_data, len)
+                        self.receive_new(appid, app, len)
                     }
                     3 => {
                         // Abort RX
@@ -303,16 +297,27 @@ impl uart::TransmitClient for Console<'_> {
         // application.
         self.tx_buffer.replace(buffer);
         self.tx_in_progress.take().map(|appid| {
-            self.apps.enter(appid, |app, kernel_data| {
-                match self.send_continue(appid, app, kernel_data) {
-                    true => {
-                        // Still more to send. Wait to notify the process.
+            self.apps.enter(appid, |app, upcalls| {
+                match self.send_continue(appid, app) {
+                    Ok(more_to_send) => {
+                        if !more_to_send {
+                            // Go ahead and signal the application
+                            let written = app.write_len;
+                            app.write_len = 0;
+                            upcalls.schedule_upcall(1, (written, 0, 0)).ok();
+                        }
                     }
-                    false => {
-                        // Go ahead and signal the application
-                        let written = app.write_len;
+                    Err(return_code) => {
+                        // XXX This shouldn't ever happen?
                         app.write_len = 0;
-                        kernel_data.schedule_upcall(1, (written, 0, 0)).ok();
+                        app.write_remaining = 0;
+                        app.pending_write = false;
+                        upcalls
+                            .schedule_upcall(
+                                1,
+                                (kernel::errorcode::into_statuscode(return_code), 0, 0),
+                            )
+                            .ok();
                     }
                 }
             })
@@ -323,10 +328,25 @@ impl uart::TransmitClient for Console<'_> {
         if self.tx_in_progress.is_none() {
             for cntr in self.apps.iter() {
                 let appid = cntr.processid();
-                let started_tx = cntr.enter(|app, kernel_data| {
+                let started_tx = cntr.enter(|app, upcalls| {
                     if app.pending_write {
                         app.pending_write = false;
-                        self.send_continue(appid, app, kernel_data)
+                        match self.send_continue(appid, app) {
+                            Ok(more_to_send) => more_to_send,
+                            Err(return_code) => {
+                                // XXX This shouldn't ever happen?
+                                app.write_len = 0;
+                                app.write_remaining = 0;
+                                app.pending_write = false;
+                                upcalls
+                                    .schedule_upcall(
+                                        1,
+                                        (kernel::errorcode::into_statuscode(return_code), 0, 0),
+                                    )
+                                    .ok();
+                                false
+                            }
+                        }
                     } else {
                         false
                     }
@@ -351,24 +371,22 @@ impl uart::ReceiveClient for Console<'_> {
             .take()
             .map(|appid| {
                 self.apps
-                    .enter(appid, |_, kernel_data| {
+                    .enter(appid, |app, upcalls| {
                         // An iterator over the returned buffer yielding only the first `rx_len`
                         // bytes
                         let rx_buffer = buffer.iter().take(rx_len);
                         match error {
                             uart::Error::None | uart::Error::Aborted => {
                                 // Receive some bytes, signal error type and return bytes to process buffer
-                                let count = kernel_data
-                                    .get_readwrite_processbuffer(rw_allow::READ)
-                                    .and_then(|read| {
-                                        read.mut_enter(|data| {
-                                            let mut c = 0;
-                                            for (a, b) in data.iter().zip(rx_buffer) {
-                                                c = c + 1;
-                                                a.set(*b);
-                                            }
-                                            c
-                                        })
+                                let count = app
+                                    .read_buffer
+                                    .mut_enter(|data| {
+                                        let mut c = 0;
+                                        for (a, b) in data.iter().zip(rx_buffer) {
+                                            c = c + 1;
+                                            a.set(*b);
+                                        }
+                                        c
                                     })
                                     .unwrap_or(-1);
 
@@ -388,12 +406,9 @@ impl uart::ReceiveClient for Console<'_> {
                                 //
                                 // If count < 0 this means the buffer
                                 // disappeared: return NOMEM.
-                                let read_buffer_len = kernel_data
-                                    .get_readwrite_processbuffer(rw_allow::READ)
-                                    .map_or(0, |read| read.len());
                                 let (ret, received_length) = if count < 0 {
                                     (Err(ErrorCode::NOMEM), 0)
-                                } else if rx_len > read_buffer_len {
+                                } else if rx_len > app.read_buffer.len() {
                                     // Return `SIZE` indicating that
                                     // some received bytes were dropped.
                                     // We report the length that we
@@ -401,14 +416,14 @@ impl uart::ReceiveClient for Console<'_> {
                                     // but also indicate that there was
                                     // an issue in the kernel with the
                                     // receive.
-                                    (Err(ErrorCode::SIZE), read_buffer_len)
+                                    (Err(ErrorCode::SIZE), app.read_buffer.len())
                                 } else {
                                     // This is the normal and expected
                                     // case.
                                     (rcode, rx_len)
                                 };
 
-                                kernel_data
+                                upcalls
                                     .schedule_upcall(
                                         2,
                                         (
@@ -421,7 +436,7 @@ impl uart::ReceiveClient for Console<'_> {
                             }
                             _ => {
                                 // Some UART error occurred
-                                kernel_data
+                                upcalls
                                     .schedule_upcall(
                                         2,
                                         (

@@ -65,21 +65,13 @@ pub enum AbortResult {
 }
 
 pub trait Uart<'a>: Configure + Configuration + Transmit<'a> + Receive<'a> {}
-<<<<<<< HEAD
 pub trait UartData<'a>: Configuration + Transmit<'a> + Receive<'a> {}
-=======
-pub trait UartData<'a>: Transmit<'a> + Receive<'a> {}
->>>>>>> origin/trd-uart-final
 pub trait UartAdvanced<'a>: Configure + Configuration + Transmit<'a> + ReceiveAdvanced<'a> {}
 pub trait Client: Configuration + ReceiveClient + TransmitClient {}
 
 // Provide blanket implementations for all trait groups
 impl<'a, T: Configure + Configuration + Transmit<'a> + Receive<'a>> Uart<'a> for T {}
-<<<<<<< HEAD
 impl<'a, T: Configuration + Transmit<'a> + Receive<'a>> UartData<'a> for T {}
-=======
-impl<'a, T: Transmit<'a> + Receive<'a>> UartData<'a> for T {}
->>>>>>> origin/trd-uart-final
 impl<'a, T: Configure + Configuration + Transmit<'a> + ReceiveAdvanced<'a>> UartAdvanced<'a> for T {}
 impl<T: Configuration + ReceiveClient + TransmitClient> Client for T {}
 
@@ -90,20 +82,7 @@ pub trait Configuration {
     fn get_parity(&self) -> Parity;
     fn get_stop_bits(&self) -> StopBits;
     fn get_flow_control(&self) -> bool;
-<<<<<<< HEAD
     fn get_configuration(&self) -> Parameters; // TODO: TRD has this as Configuration, but this seems to make more sense
-=======
-    // TODO: TRD has this as Configuration, but this seems to make more sense
-    fn get_configuration(&self) -> Parameters {
-        Parameters {
-            baud_rate: self.get_baud_rate(),
-            width: self.get_width(),
-            parity: self.get_parity(),
-            stop_bits: self.get_stop_bits(),
-            hw_flow_control: self.get_flow_control(),
-        }
-    }
->>>>>>> origin/trd-uart-final
 }
 
 /// Trait for configuring a UART.

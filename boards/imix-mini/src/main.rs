@@ -46,10 +46,6 @@ static mut PROCESSES: [Option<&'static dyn kernel::process::Process>; NUM_PROCS]
     [None; NUM_PROCS];
 
 static mut CHIP: Option<&'static sam4l::chip::Sam4l<Sam4lDefaultPeripherals>> = None;
-<<<<<<< HEAD
-=======
-static mut PROCESS_PRINTER: Option<&'static kernel::process::ProcessPrinterText> = None;
->>>>>>> origin/trd-uart-final
 
 /// Dummy buffer that causes the linker to reserve enough space for the stack.
 #[no_mangle]
@@ -58,16 +54,8 @@ pub static mut STACK_MEMORY: [u8; 0x2000] = [0; 0x2000];
 
 struct Imix {
     alarm: &'static AlarmDriver<'static, VirtualMuxAlarm<'static, sam4l::ast::Ast<'static>>>,
-<<<<<<< HEAD
     led:
         &'static capsules::led::LedDriver<'static, LedHigh<'static, sam4l::gpio::GPIOPin<'static>>>,
-=======
-    led: &'static capsules::led::LedDriver<
-        'static,
-        LedHigh<'static, sam4l::gpio::GPIOPin<'static>>,
-        1,
-    >,
->>>>>>> origin/trd-uart-final
     scheduler: &'static RoundRobinSched<'static>,
     systick: cortexm4::systick::SysTick,
 }
@@ -252,12 +240,6 @@ pub unsafe fn main() {
         DynamicDeferredCall::new(dynamic_deferred_call_clients)
     );
     DynamicDeferredCall::set_global_instance(dynamic_deferred_caller);
-<<<<<<< HEAD
-=======
-    let process_printer =
-        components::process_printer::ProcessPrinterTextComponent::new().finalize(());
-    PROCESS_PRINTER = Some(process_printer);
->>>>>>> origin/trd-uart-final
 
     // # CONSOLE
     peripherals.usart3.set_mode(sam4l::usart::UsartMode::Uart);
@@ -278,7 +260,6 @@ pub unsafe fn main() {
     //    ConsoleComponent::new(board_kernel, capsules::console::DRIVER_NUM, uart_mux).finalize(());
     //DebugWriterComponent::new(uart_mux).finalize(());
 
-<<<<<<< HEAD
     use kernel::hil;
     // hil::uart::Transmit::set_transmit_client(&peripherals.usart3, console);
     // NOTE: no receive client set
@@ -287,8 +268,6 @@ pub unsafe fn main() {
     hil::uart::Receive::receive_buffer(&peripherals.usart3, &mut ECHO_BUFFER, 4)
         .expect("Failed to receive buffer");
 
-=======
->>>>>>> origin/trd-uart-final
     // # TIMER
     let mux_alarm = AlarmMuxComponent::new(&peripherals.ast)
         .finalize(components::alarm_mux_component_helper!(sam4l::ast::Ast));
@@ -296,7 +275,6 @@ pub unsafe fn main() {
     let alarm = AlarmDriverComponent::new(board_kernel, capsules::alarm::DRIVER_NUM, mux_alarm)
         .finalize(components::alarm_component_helper!(sam4l::ast::Ast));
 
-<<<<<<< HEAD
     let led = LedsComponent::new(components::led_component_helper!(
         LedHigh<'static, sam4l::gpio::GPIOPin>,
         LedHigh::new(&peripherals.pc[10]),
@@ -305,12 +283,6 @@ pub unsafe fn main() {
         LedHigh<'static, sam4l::gpio::GPIOPin>
     ));
 
-=======
-    let led = LedsComponent::new().finalize(components::led_component_helper!(
-        LedHigh<'static, sam4l::gpio::GPIOPin>,
-        LedHigh::new(&peripherals.pc[10]),
-    ));
->>>>>>> origin/trd-uart-final
     let scheduler = components::sched::round_robin::RoundRobinComponent::new(&PROCESSES)
         .finalize(components::rr_component_helper!(NUM_PROCS));
 
@@ -327,7 +299,6 @@ pub unsafe fn main() {
     // Once everything is virtualized in the kernel this won't be a problem.
     // -pal, 11/20/18
     //
-<<<<<<< HEAD
     /******** Test for transmit_buffer ********/
     //test::virtual_uart_rx_test::run_virtual_uart_receive(uart_mux);
     //debug!("first");
@@ -340,11 +311,6 @@ pub unsafe fn main() {
     //let character = 0xffff41;
     //peripherals.usart3.set_width(hil::uart::Width::Eight);
     //peripherals.usart3.transmit_character(character);
-=======
-    //test::virtual_uart_rx_test::run_virtual_uart_receive(uart_mux);
-    debug!("Initialization complete. Entering main loop");
-    debug!("A second line");
->>>>>>> origin/trd-uart-final
 
     /// These symbols are defined in the linker script.
     extern "C" {
@@ -378,7 +344,6 @@ pub unsafe fn main() {
         debug!("{:?}", err);
     });
 
-<<<<<<< HEAD
     board_kernel.kernel_loop::<_, _, NUM_PROCS, 0>(&imix, chip, None, &main_cap);
 }
 
@@ -433,7 +398,4 @@ impl<'a> kernel::hil::uart::ReceiveClient for Echo<'a> {
             self.uart.receive_abort();
         }
     }
-=======
-    board_kernel.kernel_loop::<_, _, NUM_PROCS>(&imix, chip, None, &main_cap);
->>>>>>> origin/trd-uart-final
 }

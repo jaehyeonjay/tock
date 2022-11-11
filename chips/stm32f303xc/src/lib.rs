@@ -4,6 +4,7 @@
 
 #![crate_name = "stm32f303xc"]
 #![crate_type = "rlib"]
+#![feature(const_fn_trait_bound)]
 #![no_std]
 
 pub mod chip;

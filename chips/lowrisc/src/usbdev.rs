@@ -420,7 +420,7 @@ impl<'a> Usb<'a> {
     }
 
     fn get_state(&self) -> State {
-        self.state.unwrap_or_panic() // Unwrap fail = get_state: state value is in use
+        self.state.expect("get_state: state value is in use")
     }
 
     fn set_state(&self, state: State) {
@@ -501,7 +501,9 @@ impl<'a> Usb<'a> {
 
     fn copy_slice_out_to_hw(&self, ep: usize, buf_id: usize, size: usize) {
         // Get the slice
-        let slice = self.descriptors[ep].slice_out.unwrap_or_panic(); // Unwrap fail = No OUT slice set for this descriptor
+        let slice = self.descriptors[ep]
+            .slice_out
+            .expect("No OUT slice set for this descriptor");
 
         let mut slice_start = 0;
 
@@ -540,7 +542,9 @@ impl<'a> Usb<'a> {
 
     fn copy_from_hw(&self, ep: usize, buf_id: usize, size: usize) {
         // Get the slice
-        let slice = self.descriptors[ep].slice_in.unwrap_or_panic(); // Unwrap fail = No IN slice set for this descriptor
+        let slice = self.descriptors[ep]
+            .slice_in
+            .expect("No IN slice set for this descriptor");
 
         // Read the date to the buffer
         // TODO: Handle long packets
@@ -575,7 +579,7 @@ impl<'a> Usb<'a> {
                 let length = hw_buf.read(BUFFER::LENGTH);
 
                 let ep_buf = &self.descriptors[ep].slice_out;
-                let ep_buf = ep_buf.unwrap_or_panic(); // Unwrap fail = No OUT slice set for this descriptor
+                let ep_buf = ep_buf.expect("No OUT slice set for this descriptor");
                 if ep_buf.len() < 8 {
                     panic!("EP0 DMA buffer length < 8");
                 }
@@ -682,7 +686,7 @@ impl<'a> Usb<'a> {
 
     fn ep_receive(&self, ep: usize, buf_id: usize, size: u32, _setup: u32) {
         let ep_buf = &self.descriptors[ep].slice_out;
-        let ep_buf = ep_buf.unwrap_or_panic(); // Unwrap fail = No OUT slice set for this descriptor
+        let ep_buf = ep_buf.expect("No OUT slice set for this descriptor");
         if ep_buf.len() < 8 {
             panic!("EP0 DMA buffer length < 8");
         }

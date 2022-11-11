@@ -21,7 +21,7 @@ driver is in capsules/src/low\_level\_debug.rs.
 
   * ### Command Number: 0
 
-    **Description**: Existence check.
+    **Description**: Driver check.
 
     **Argument 1**: Unused
 

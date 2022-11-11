@@ -72,26 +72,25 @@ impl InterruptService<()> for LiteXArtyInterruptablePeripherals {
 }
 
 const NUM_PROCS: usize = 4;
+const NUM_UPCALLS_IPC: usize = NUM_PROCS + 1;
 
 // Actual memory for holding the active process structures. Need an
 // empty list at least.
 static mut PROCESSES: [Option<&'static dyn kernel::process::Process>; NUM_PROCS] =
     [None; NUM_PROCS];
 
-// Reference to the chip, led controller, UART hardware, and process printer for
-// panic dumps.
+// Reference to the chip, led controller and UART hardware for panic
+// dumps
 struct LiteXArtyPanicReferences {
     chip: Option<&'static litex_vexriscv::chip::LiteXVexRiscv<LiteXArtyInterruptablePeripherals>>,
     uart: Option<&'static litex_vexriscv::uart::LiteXUart<'static, socc::SoCRegisterFmt>>,
     led_controller:
         Option<&'static litex_vexriscv::led_controller::LiteXLedController<socc::SoCRegisterFmt>>,
-    process_printer: Option<&'static kernel::process::ProcessPrinterText>,
 }
 static mut PANIC_REFERENCES: LiteXArtyPanicReferences = LiteXArtyPanicReferences {
     chip: None,
     uart: None,
     led_controller: None,
-    process_printer: None,
 };
 
 // How should the kernel respond when a process faults.
@@ -108,7 +107,6 @@ struct LiteXArty {
     led_driver: &'static capsules::led::LedDriver<
         'static,
         litex_vexriscv::led_controller::LiteXLed<'static, socc::SoCRegisterFmt>,
-        4,
     >,
     console: &'static capsules::console::Console<'static>,
     lldb: &'static capsules::low_level_debug::LowLevelDebug<
@@ -311,8 +309,6 @@ pub unsafe fn main() {
         >,
         VirtualMuxAlarm::new(mux_alarm)
     );
-    virtual_alarm_user.setup();
-
     let alarm = static_init!(
         capsules::alarm::AlarmDriver<
             'static,
@@ -346,7 +342,6 @@ pub unsafe fn main() {
         >,
         VirtualMuxAlarm::new(mux_alarm)
     );
-    systick_virtual_alarm.setup();
 
     let scheduler_timer = static_init!(
         VirtualSchedulerTimer<
@@ -362,6 +357,7 @@ pub unsafe fn main() {
         >,
         VirtualSchedulerTimer::new(systick_virtual_alarm)
     );
+    systick_virtual_alarm.set_alarm_client(scheduler_timer);
 
     // ---------- UART ----------
 
@@ -381,7 +377,9 @@ pub unsafe fn main() {
         )
     );
     uart0.initialize(
-        dynamic_deferred_caller.register(uart0).unwrap(), // Unwrap fail = dynamic deferred caller out of slots
+        dynamic_deferred_caller
+            .register(uart0)
+            .expect("dynamic deferred caller out of slots"),
     );
 
     PANIC_REFERENCES.uart = Some(uart0);
@@ -422,14 +420,16 @@ pub unsafe fn main() {
     // ---------- LED DRIVER ----------
 
     // LEDs
-    let led_driver =
-        components::led::LedsComponent::new().finalize(components::led_component_helper!(
-            litex_vexriscv::led_controller::LiteXLed<'static, socc::SoCRegisterFmt>,
-            led0.get_led(0).unwrap(),
-            led0.get_led(1).unwrap(),
-            led0.get_led(2).unwrap(),
-            led0.get_led(3).unwrap(),
-        ));
+    let led_driver = components::led::LedsComponent::new(components::led_component_helper!(
+        litex_vexriscv::led_controller::LiteXLed<'static, socc::SoCRegisterFmt>,
+        led0.get_led(0).unwrap(),
+        led0.get_led(1).unwrap(),
+        led0.get_led(2).unwrap(),
+        led0.get_led(3).unwrap(),
+    ))
+    .finalize(components::led_component_buf!(
+        litex_vexriscv::led_controller::LiteXLed<'static, socc::SoCRegisterFmt>
+    ));
 
     // ---------- INITIALIZE CHIP, ENABLE INTERRUPTS ----------
 
@@ -454,11 +454,6 @@ pub unsafe fn main() {
 
     PANIC_REFERENCES.chip = Some(chip);
 
-    let process_printer =
-        components::process_printer::ProcessPrinterTextComponent::new().finalize(());
-
-    PANIC_REFERENCES.process_printer = Some(process_printer);
-
     // Enable RISC-V interrupts globally
     csr::CSR
         .mie
@@ -474,7 +469,7 @@ pub unsafe fn main() {
         capsules::console::DRIVER_NUM,
         uart_mux,
     )
-    .finalize(components::console_component_helper!());
+    .finalize(());
     // Create the debugger object that handles calls to `debug!()`.
     components::debug_writer::DebugWriterComponent::new(uart_mux).finalize(());
 
@@ -487,7 +482,7 @@ pub unsafe fn main() {
 
     debug!("LiteX+VexRiscv on ArtyA7: initialization complete, entering main loop.");
 
-    // These symbols are defined in the linker script.
+    /// These symbols are defined in the linker script.
     extern "C" {
         /// Beginning of the ROM region containing app images.
         static _sapps: u8;
@@ -534,7 +529,7 @@ pub unsafe fn main() {
     board_kernel.kernel_loop(
         &litex_arty,
         chip,
-        None::<&kernel::ipc::IPC<NUM_PROCS>>,
+        None::<&kernel::ipc::IPC<NUM_PROCS, NUM_UPCALLS_IPC>>,
         &main_loop_cap,
     );
 }

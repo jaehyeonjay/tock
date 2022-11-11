@@ -26,7 +26,7 @@
 //!         usb_client, board_kernel.create_grant(&grant_cap)));
 //! ```
 
-use kernel::grant::{AllowRoCount, AllowRwCount, Grant, UpcallCount};
+use kernel::grant::Grant;
 use kernel::hil;
 use kernel::syscall::{CommandReturn, SyscallDriver};
 use kernel::utilities::cells::OptionalCell;
@@ -42,7 +42,7 @@ pub struct App {
 
 pub struct UsbSyscallDriver<'a, C: hil::usb::Client<'a>> {
     usbc_client: &'a C,
-    apps: Grant<App, UpcallCount<1>, AllowRoCount<0>, AllowRwCount<0>>,
+    apps: Grant<App, 1>,
     serving_app: OptionalCell<ProcessId>,
 }
 
@@ -50,10 +50,7 @@ impl<'a, C> UsbSyscallDriver<'a, C>
 where
     C: hil::usb::Client<'a>,
 {
-    pub fn new(
-        usbc_client: &'a C,
-        apps: Grant<App, UpcallCount<1>, AllowRoCount<0>, AllowRwCount<0>>,
-    ) -> Self {
+    pub fn new(usbc_client: &'a C, apps: Grant<App, 1>) -> Self {
         UsbSyscallDriver {
             usbc_client: usbc_client,
             apps: apps,

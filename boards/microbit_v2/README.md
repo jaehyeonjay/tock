@@ -1,9 +1,9 @@
-BBC micro:bit v2 - nRF52833 with Bluetooth LE
+BBC Micro:bit v2 - nRF52833 with Bluetooth LE
 ==================================================
 
 <img src="https://cdn.sanity.io/images/ajwvhvgo/production/a7f49eb570ce06cf107dde7babaa5201411a41a1-660x720.jpg?q=80&fit=max&auto=format" width="35%">
 
-The [BBC micro:bit v2 - nRF52833 with Bluetooth LE](https://microbit.org/new-microbit/) is a
+The [BBC Micro:bit v2 - nRF52833 with Bluetooth LE](https://microbit.org/new-microbit/) is a
 board based on the Nordic nRF52833 SoC. It includes the
 following sensors:
 
@@ -130,11 +130,6 @@ $ tockloader install --openocd --board microbit_v2 --bundle-apps app.tab
 > ```bash
 > $ tockloader ... --page-size 512
 > ```
-
-## Book
-
-For further details and examples about how to use Tock with the BBC micro:bit, you might
-want to check out the [Getting Started with Secure Embedded Systems](https://link.springer.com/book/10.1007/978-1-4842-7789-8) book.
 
 ## Troubleshooting
 

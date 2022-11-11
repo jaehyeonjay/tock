@@ -116,7 +116,7 @@ static mut IP6_DG_OPT: Option<IP6Packet> = None;
 //END changes
 
 pub struct LowpanTest<'a, A: time::Alarm<'a>> {
-    alarm: &'a A,
+    alarm: A,
     sixlowpan_tx: TxState<'a>,
     radio: &'a dyn MacDevice<'a>,
     test_counter: Cell<usize>,
@@ -140,8 +140,6 @@ pub unsafe fn initialize_all(
         VirtualMuxAlarm<sam4l::ast::Ast>,
         VirtualMuxAlarm::new(mux_alarm)
     );
-    sixlo_alarm.setup();
-
     let sixlowpan = static_init!(
         Sixlowpan<
             'static,
@@ -164,15 +162,9 @@ pub unsafe fn initialize_all(
 
     let _ = sixlowpan_tx.init(SRC_MAC_ADDR, DST_MAC_ADDR, radio_mac.get_pan(), None);
 
-    let alarm = static_init!(
-        VirtualMuxAlarm<'static, sam4l::ast::Ast>,
-        VirtualMuxAlarm::new(mux_alarm)
-    );
-    alarm.setup();
-
     let lowpan_frag_test = static_init!(
         LowpanTest<'static, VirtualMuxAlarm<'static, sam4l::ast::Ast>>,
-        LowpanTest::new(sixlowpan_tx, radio_mac, alarm)
+        LowpanTest::new(sixlowpan_tx, radio_mac, VirtualMuxAlarm::new(mux_alarm))
     );
 
     sixlowpan_state.add_rx_state(default_rx_state);
@@ -225,7 +217,7 @@ impl<'a, A: time::Alarm<'a>> LowpanTest<'a, A> {
     pub fn new(
         sixlowpan_tx: TxState<'a>,
         radio: &'a dyn MacDevice<'a>,
-        alarm: &'a A,
+        alarm: A,
     ) -> LowpanTest<'a, A> {
         LowpanTest {
             alarm: alarm,

@@ -6,7 +6,6 @@ use kernel::debug::IoWrite;
 
 use crate::CHIP;
 use crate::PROCESSES;
-use crate::PROCESS_PRINTER;
 
 struct Writer {}
 
@@ -37,7 +36,7 @@ pub unsafe extern "C" fn panic_fmt(pi: &PanicInfo) -> ! {
 
     debug::panic_banner(writer, pi);
     debug::panic_cpu_state(&CHIP, writer);
-    debug::panic_process_info(&PROCESSES, &PROCESS_PRINTER, writer);
+    debug::panic_process_info(&PROCESSES, writer);
 
     loop {
         rv32i::support::nop();
@@ -50,14 +49,7 @@ pub unsafe extern "C" fn panic_fmt(pi: &PanicInfo) -> ! {
 pub unsafe extern "C" fn panic_fmt(pi: &PanicInfo) -> ! {
     let writer = &mut WRITER;
 
-    debug::panic_print(
-        writer,
-        pi,
-        &rv32i::support::nop,
-        &PROCESSES,
-        &CHIP,
-        &PROCESS_PRINTER,
-    );
+    debug::panic_print(writer, pi, &rv32i::support::nop, &PROCESSES, &CHIP);
 
     let _ = writeln!(writer, "{}", pi);
     loop {}

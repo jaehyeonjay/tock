@@ -30,26 +30,11 @@ The screen driver allows the process to write data to a framebuffer of a screen.
 
     **Returns**: SUCCESS_U32 with 1 if yes, and 0 if no
 
-  * ### Command number: `2`
-
-    **Description**: Set power
-
-    **Argument 1**: 0 if off, nonzero if on.
-
-    **Argument 2**: unused
-
-    **Returns**: Ok(()) followed by the ready callback if the command was successful,
-    BUSY if another command is in progress,
-
   * ### Command number: `3`
 
     **Description**: Set brightness
 
-    **Argument 1**: Lightness value, relative to minimum and maximum supported.
-    0 should turn off the light if available, greater than 0 should set it to minimum.
-    65535 and above turn lightness to the maximum supported.
-    Intermediate values approximate intermediate lightness levels.
-    May take effect only after power is set (e.g. for LED displays).
+    **Argument 1**: Percent of brightness, 0% should turn off the screen, greater than 0% should turn it on.
 
     **Argument 2**: unused
 
@@ -231,5 +216,5 @@ The screen driver allows the process to write data to a framebuffer of a screen.
     completion callback is undefined (most likely either the original buffer or
     new buffer will be written in its entirety but not both).
 
-    **Returns**: Ok(()) if the subscribe was successful.
+    **Returns**: Ok(()) if the subscribe was successful, INVAL if the buffer's length is not a multiple of the color depth length. 
 

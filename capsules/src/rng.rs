@@ -21,13 +21,14 @@
 //! ```
 
 use core::cell::Cell;
+use core::mem;
 
-use kernel::grant::{AllowRoCount, AllowRwCount, Grant, UpcallCount};
+use kernel::grant::Grant;
 use kernel::hil::entropy;
 use kernel::hil::entropy::{Entropy32, Entropy8};
 use kernel::hil::rng;
 use kernel::hil::rng::{Client, Continue, Random, Rng};
-use kernel::processbuffer::WriteableProcessBuffer;
+use kernel::processbuffer::{ReadWriteProcessBuffer, WriteableProcessBuffer};
 use kernel::syscall::{CommandReturn, SyscallDriver};
 use kernel::utilities::cells::OptionalCell;
 use kernel::{ErrorCode, ProcessId};
@@ -36,30 +37,21 @@ use kernel::{ErrorCode, ProcessId};
 use crate::driver;
 pub const DRIVER_NUM: usize = driver::NUM::Rng as usize;
 
-/// Ids for read-write allow buffers
-mod rw_allow {
-    pub const BUFFER: usize = 0;
-    /// The number of allow buffers the kernel stores for this grant
-    pub const COUNT: usize = 1;
-}
-
 #[derive(Default)]
 pub struct App {
+    buffer: ReadWriteProcessBuffer,
     remaining: usize,
     idx: usize,
 }
 
 pub struct RngDriver<'a> {
     rng: &'a dyn Rng<'a>,
-    apps: Grant<App, UpcallCount<1>, AllowRoCount<0>, AllowRwCount<{ rw_allow::COUNT }>>,
+    apps: Grant<App, 1>,
     getting_randomness: Cell<bool>,
 }
 
 impl<'a> RngDriver<'a> {
-    pub fn new(
-        rng: &'a dyn Rng<'a>,
-        grant: Grant<App, UpcallCount<1>, AllowRoCount<0>, AllowRwCount<{ rw_allow::COUNT }>>,
-    ) -> RngDriver<'a> {
+    pub fn new(rng: &'a dyn Rng<'a>, grant: Grant<App, 1>) -> RngDriver<'a> {
         RngDriver {
             rng: rng,
             apps: grant,
@@ -76,59 +68,55 @@ impl rng::Client for RngDriver<'_> {
     ) -> rng::Continue {
         let mut done = true;
         for cntr in self.apps.iter() {
-            cntr.enter(|app, kernel_data| {
+            cntr.enter(|app, upcalls| {
                 // Check if this app needs random values.
                 if app.remaining > 0 {
                     // Provide the current application values to the closure
                     let (oldidx, oldremaining) = (app.idx, app.remaining);
 
-                    let (newidx, newremaining) = kernel_data
-                        .get_readwrite_processbuffer(rw_allow::BUFFER)
-                        .and_then(|buffer| {
-                            buffer.mut_enter(|buffer| {
-                                let mut idx = oldidx;
-                                let mut remaining = oldremaining;
+                    let (newidx, newremaining) = app
+                        .buffer
+                        .mut_enter(|buffer| {
+                            let mut idx = oldidx;
+                            let mut remaining = oldremaining;
 
-                                // Check that the app is not asking for more than can
-                                // fit in the provided buffer
-                                if buffer.len() < idx {
-                                    // The buffer does not fit at all
-                                    // anymore (the app must've swapped
-                                    // buffers), end the operation
-                                    return (0, 0);
-                                } else if buffer.len() < idx + remaining {
-                                    remaining = buffer.len() - idx;
-                                }
+                            // Check that the app is not asking for more than can
+                            // fit in the provided buffer
+                            if buffer.len() < idx {
+                                // The buffer does not fit at all
+                                // anymore (the app must've swapped
+                                // buffers), end the operation
+                                return (0, 0);
+                            } else if buffer.len() < idx + remaining {
+                                remaining = buffer.len() - idx;
+                            }
 
-                                // Add all available and requested randomness to the app buffer.
+                            // Add all available and requested randomness to the app buffer.
 
-                                // 1. Slice buffer to start from current idx
-                                let buf = &buffer[idx..(idx + remaining)];
-                                // 2. Take at most as many random samples as needed to fill the buffer
-                                //    (if app.remaining is not word-sized, take an extra one).
-                                let remaining_ints = if remaining % 4 == 0 {
-                                    remaining / 4
-                                } else {
-                                    remaining / 4 + 1
-                                };
+                            // 1. Slice buffer to start from current idx
+                            let buf = &buffer[idx..(idx + remaining)];
+                            // 2. Take at most as many random samples as needed to fill the buffer
+                            //    (if app.remaining is not word-sized, take an extra one).
+                            let remaining_ints = if remaining % 4 == 0 {
+                                remaining / 4
+                            } else {
+                                remaining / 4 + 1
+                            };
 
-                                // 3. Zip over the randomness iterator and chunks
-                                //    of up to 4 bytes from the buffer.
-                                for (inp, outs) in
-                                    randomness.take(remaining_ints).zip(buf.chunks(4))
-                                {
-                                    // 4. For each word of randomness input, update
-                                    //    the remaining and idx and add to buffer.
-                                    let inbytes = u32::to_le_bytes(inp);
-                                    outs.iter().zip(inbytes.iter()).for_each(|(out, inb)| {
-                                        out.set(*inb);
-                                        remaining -= 1;
-                                        idx += 1;
-                                    });
-                                }
+                            // 3. Zip over the randomness iterator and chunks
+                            //    of up to 4 bytes from the buffer.
+                            for (inp, outs) in randomness.take(remaining_ints).zip(buf.chunks(4)) {
+                                // 4. For each word of randomness input, update
+                                //    the remaining and idx and add to buffer.
+                                let inbytes = u32::to_le_bytes(inp);
+                                outs.iter().zip(inbytes.iter()).for_each(|(out, inb)| {
+                                    out.set(*inb);
+                                    remaining -= 1;
+                                    idx += 1;
+                                });
+                            }
 
-                                (idx, remaining)
-                            })
+                            (idx, remaining)
                         })
                         .unwrap_or(
                             // If the process is no longer alive
@@ -145,7 +133,7 @@ impl rng::Client for RngDriver<'_> {
                     if app.remaining > 0 {
                         done = false;
                     } else {
-                        kernel_data.schedule_upcall(0, (0, newidx, 0)).ok();
+                        upcalls.schedule_upcall(0, (0, newidx, 0)).ok();
                     }
                 }
             });
@@ -168,6 +156,30 @@ impl rng::Client for RngDriver<'_> {
 }
 
 impl<'a> SyscallDriver for RngDriver<'a> {
+    fn allow_readwrite(
+        &self,
+        appid: ProcessId,
+        allow_num: usize,
+        mut slice: ReadWriteProcessBuffer,
+    ) -> Result<ReadWriteProcessBuffer, (ReadWriteProcessBuffer, ErrorCode)> {
+        // pass buffer in from application
+        let res = match allow_num {
+            0 => self
+                .apps
+                .enter(appid, |app, _| {
+                    mem::swap(&mut app.buffer, &mut slice);
+                    Ok(())
+                })
+                .unwrap_or_else(|err| Err(err.into())),
+            _ => Err(ErrorCode::NOSUPPORT),
+        };
+
+        match res {
+            Ok(()) => Ok(slice),
+            Err(e) => Err((slice, e)),
+        }
+    }
+
     fn command(
         &self,
         command_num: usize,

@@ -3,7 +3,6 @@ use core::panic::PanicInfo;
 
 use crate::CHIP;
 use crate::PROCESSES;
-use crate::PROCESS_PRINTER;
 use apollo3;
 use kernel::debug;
 use kernel::debug::IoWrite;
@@ -50,6 +49,5 @@ pub unsafe extern "C" fn panic_fmt(info: &PanicInfo) -> ! {
         &cortexm4::support::nop,
         &PROCESSES,
         &CHIP,
-        &PROCESS_PRINTER,
     )
 }

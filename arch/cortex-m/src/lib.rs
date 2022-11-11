@@ -2,7 +2,7 @@
 
 #![crate_name = "cortexm"]
 #![crate_type = "rlib"]
-#![feature(asm_sym)]
+#![feature(asm)]
 #![feature(naked_functions)]
 #![no_std]
 
@@ -15,7 +15,7 @@ pub mod support;
 pub mod syscall;
 pub mod systick;
 
-// These constants are defined in the linker script.
+/// These constants are defined in the linker script.
 extern "C" {
     static _estack: u32;
     static mut _sstack: u32;
@@ -40,7 +40,6 @@ extern "C" {
 ))]
 #[naked]
 pub unsafe extern "C" fn systick_handler_arm_v7m() {
-    use core::arch::asm;
     asm!(
         "
     // Set thread mode to privileged to switch back to kernel mode.
@@ -71,7 +70,6 @@ pub unsafe extern "C" fn systick_handler_arm_v7m() {
 ))]
 #[naked]
 pub unsafe extern "C" fn svc_handler_arm_v7m() {
-    use core::arch::asm;
     asm!(
         "
     // First check to see which direction we are going in. If the link register
@@ -134,7 +132,6 @@ pub unsafe extern "C" fn svc_handler_arm_v7m() {
 ))]
 #[naked]
 pub unsafe extern "C" fn generic_isr_arm_v7m() {
-    use core::arch::asm;
     asm!(
         "
     // Set thread mode to privileged to ensure we are executing as the kernel.
@@ -212,7 +209,6 @@ pub unsafe extern "C" fn generic_isr_arm_v7m() {
 
 #[cfg(all(target_arch = "arm", target_os = "none"))]
 pub unsafe extern "C" fn unhandled_interrupt() {
-    use core::arch::asm;
     let mut interrupt_number: u32;
 
     // IPSR[8:0] holds the currently active interrupt
@@ -236,7 +232,6 @@ pub unsafe extern "C" fn unhandled_interrupt() {
 #[cfg(all(target_arch = "arm", target_os = "none"))]
 #[naked]
 pub unsafe extern "C" fn initialize_ram_jump_to_main() {
-    use core::arch::asm;
     asm!(
         "
     // Start by initializing .bss memory. The Tock linker script defines
@@ -303,7 +298,6 @@ pub unsafe extern "C" fn switch_to_user_arm_v7m(
     mut user_stack: *const usize,
     process_regs: &mut [usize; 8],
 ) -> *const usize {
-    use core::arch::asm;
     asm!(
     "
     // Rust `asm!()` macro (as of May 2021) will not let us mark r6, r7 and r9
@@ -520,7 +514,6 @@ unsafe extern "C" fn hard_fault_handler_arm_v7m_continued(
     kernel_stack: u32,
     stack_overflow: u32,
 ) {
-    use core::arch::asm;
     if kernel_stack != 0 {
         if stack_overflow != 0 {
             // Panic to show the correct error.
@@ -577,7 +570,6 @@ unsafe extern "C" fn hard_fault_handler_arm_v7m_continued(
 ))]
 #[naked]
 pub unsafe extern "C" fn hard_fault_handler_arm_v7m() {
-    use core::arch::asm;
     // First need to determine if this a kernel fault or a userspace fault, and store
     // the unmodified stack pointer. Place these values in registers, then call
     // a non-naked function, to allow for use of rust code alongside inline asm.

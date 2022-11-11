@@ -24,7 +24,6 @@
 //!     capsules::virtual_alarm::VirtualMuxAlarm<'static, nrf5x::rtc::Rtc>,
 //!     capsules::virtual_alarm::VirtualMuxAlarm::new(mux_alarm)
 //! );
-//! virtual_alarm_buzzer.setup();
 //!
 //! let buzzer = static_init!(
 //!     capsules::buzzer_driver::Buzzer<
@@ -41,7 +40,7 @@
 
 use core::cmp;
 
-use kernel::grant::{AllowRoCount, AllowRwCount, Grant, UpcallCount};
+use kernel::grant::Grant;
 use kernel::hil;
 use kernel::hil::time::Frequency;
 use kernel::syscall::{CommandReturn, SyscallDriver};
@@ -74,7 +73,7 @@ pub struct Buzzer<'a, A: hil::time::Alarm<'a>> {
     // Alarm to stop the buzzer after some time.
     alarm: &'a A,
     // Per-app state.
-    apps: Grant<App, UpcallCount<1>, AllowRoCount<0>, AllowRwCount<0>>,
+    apps: Grant<App, 1>,
     // Which app is currently using the buzzer.
     active_app: OptionalCell<ProcessId>,
     // Max buzz time.
@@ -86,7 +85,7 @@ impl<'a, A: hil::time::Alarm<'a>> Buzzer<'a, A> {
         pwm_pin: &'a dyn hil::pwm::PwmPin,
         alarm: &'a A,
         max_duration_ms: usize,
-        grant: Grant<App, UpcallCount<1>, AllowRoCount<0>, AllowRwCount<0>>,
+        grant: Grant<App, 1>,
     ) -> Buzzer<'a, A> {
         Buzzer {
             pwm_pin: pwm_pin,

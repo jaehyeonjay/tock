@@ -18,7 +18,7 @@
 //! hil::sensors::NineDof::set_client(fxos8700, ninedof);
 //! ```
 
-use kernel::grant::{AllowRoCount, AllowRwCount, Grant, UpcallCount};
+use kernel::grant::Grant;
 use kernel::hil;
 use kernel::syscall::{CommandReturn, SyscallDriver};
 use kernel::utilities::cells::OptionalCell;
@@ -54,14 +54,14 @@ impl Default for App {
 
 pub struct NineDof<'a> {
     drivers: &'a [&'a dyn hil::sensors::NineDof<'a>],
-    apps: Grant<App, UpcallCount<1>, AllowRoCount<0>, AllowRwCount<0>>,
+    apps: Grant<App, 1>,
     current_app: OptionalCell<ProcessId>,
 }
 
 impl<'a> NineDof<'a> {
     pub fn new(
         drivers: &'a [&'a dyn hil::sensors::NineDof<'a>],
-        grant: Grant<App, UpcallCount<1>, AllowRoCount<0>, AllowRwCount<0>>,
+        grant: Grant<App, 1>,
     ) -> NineDof<'a> {
         NineDof {
             drivers: drivers,

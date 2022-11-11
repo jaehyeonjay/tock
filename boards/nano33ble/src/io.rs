@@ -11,7 +11,6 @@ use nrf52840::gpio::Pin;
 
 use crate::CHIP;
 use crate::PROCESSES;
-use crate::PROCESS_PRINTER;
 use kernel::hil::uart::Transmit;
 use kernel::utilities::cells::VolatileCell;
 
@@ -134,6 +133,5 @@ pub unsafe extern "C" fn panic_fmt(pi: &PanicInfo) -> ! {
         &cortexm4::support::nop,
         &PROCESSES,
         &CHIP,
-        &PROCESS_PRINTER,
     )
 }

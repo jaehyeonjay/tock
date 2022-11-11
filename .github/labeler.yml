@@ -25,9 +25,8 @@ tock-libraries:
   - libraries/**/*
 
 WG-OpenTitan:
-  - boards/opentitan/**/*
+  - boards/earlgrey-nexysvideo/**/*
   - chips/earlgrey/**/*
-  - chips/lowrisc/**/*
 
 # add kernel label unless already covered by hil label
 kernel:

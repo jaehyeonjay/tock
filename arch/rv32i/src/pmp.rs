@@ -185,10 +185,6 @@ impl PMPRegion {
         self.location
     }
 
-    /// Check if the PMP regions specified by `other_start` and `other_size`
-    /// overlaps with the current region.
-    /// Matching the RISC-V spec this checks pmpaddr[i-i] <= y < pmpaddr[i] for
-    /// TOR ranges.
     fn overlaps(&self, other_start: *const u8, other_size: usize) -> bool {
         let other_start = other_start as usize;
         let other_end = other_start + other_size;
@@ -201,9 +197,7 @@ impl PMPRegion {
             (region_start, region_end)
         };
 
-        // PMP addresses are not inclusive on the high end, that is
-        //     pmpaddr[i-i] <= y < pmpaddr[i]
-        if region_start < (other_end - 4) && other_start < (region_end - 4) {
+        if region_start < other_end && other_start < region_end {
             true
         } else {
             false
